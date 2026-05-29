@@ -347,14 +347,15 @@ For more information, see: https://github.com/ironystock/agentic-obs
 // repeat.
 func toolGroupsFromConfig(c config.ToolGroupConfig) mcp.ToolGroupConfig {
 	return mcp.ToolGroupConfig{
-		Core:        c.Core,
-		Visual:      c.Visual,
-		Layout:      c.Layout,
-		Audio:       c.Audio,
-		Sources:     c.Sources,
-		Design:      c.Design,
-		Filters:     c.Filters,
-		Transitions: c.Transitions,
-		Automation:  c.Automation,
+		Core:                  c.Core,
+		Visual:                c.Visual,
+		Layout:                c.Layout,
+		Audio:                 c.Audio,
+		Sources:               c.Sources,
+		Design:                c.Design,
+		Filters:               c.Filters,
+		Transitions:           c.Transitions,
+		Automation:            c.Automation,
+		AdvancedSceneSwitcher: c.AdvancedSceneSwitcher,
 	}
 }
