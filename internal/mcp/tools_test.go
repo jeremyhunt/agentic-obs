@@ -2499,3 +2499,190 @@ func TestHandleCreateAudioInput(t *testing.T) {
 		assert.Contains(t, err.Error(), "OBS unavailable")
 	})
 }
+
+// ── Advanced Scene Switcher handler tests ────────────────────────────────────
+
+func TestHandleASSRunMacro(t *testing.T) {
+	t.Run("triggers macro by name", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		input := ASSRunMacroInput{Name: "pentakill_overlay"}
+		_, result, err := server.handleASSRunMacro(context.Background(), nil, input)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		_, lastMacro, varCount, _ := mock.GetASSCalls()
+		assert.Equal(t, "pentakill_overlay", lastMacro)
+		assert.Equal(t, 0, varCount)
+	})
+
+	t.Run("passes variables atomically with macro", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		input := ASSRunMacroInput{
+			Name: "persona_speaking",
+			Variables: []ASSVariableInput{
+				{Name: "active_persona", Value: "sonic"},
+				{Name: "kill_count", Value: 42},
+				{Name: "is_live", Value: true},
+				{Name: "cleared", Value: nil},
+			},
+		}
+		_, _, err := server.handleASSRunMacro(context.Background(), nil, input)
+
+		require.NoError(t, err)
+		_, lastMacro, varCount, _ := mock.GetASSCalls()
+		assert.Equal(t, "persona_speaking", lastMacro)
+		assert.Equal(t, 4, varCount) // coercion correctness is verified in TestHandleASSSetVariables
+	})
+
+	t.Run("rejects empty macro name", func(t *testing.T) {
+		server, _ := testServer(t)
+
+		_, _, err := server.handleASSRunMacro(context.Background(), nil, ASSRunMacroInput{Name: ""})
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "name must not be empty")
+	})
+
+	t.Run("propagates OBS error", func(t *testing.T) {
+		server, mock := testServer(t)
+		mock.SetASSError("run_macro", errors.New("macro not found"))
+
+		_, _, err := server.handleASSRunMacro(context.Background(), nil, ASSRunMacroInput{Name: "missing"})
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "macro not found")
+	})
+}
+
+func TestHandleASSSendMessage(t *testing.T) {
+	t.Run("sends message successfully", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		input := ASSSendMessageInput{Message: "stream_started"}
+		_, result, err := server.handleASSSendMessage(context.Background(), nil, input)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		messages, _, _, _ := mock.GetASSCalls()
+		require.Len(t, messages, 1)
+		assert.Equal(t, "stream_started", messages[0])
+	})
+
+	t.Run("rejects empty message", func(t *testing.T) {
+		server, _ := testServer(t)
+
+		_, _, err := server.handleASSSendMessage(context.Background(), nil, ASSSendMessageInput{Message: ""})
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "message must not be empty")
+	})
+
+	t.Run("propagates OBS error", func(t *testing.T) {
+		server, mock := testServer(t)
+		mock.SetASSError("send_message", errors.New("plugin not loaded"))
+
+		_, _, err := server.handleASSSendMessage(context.Background(), nil, ASSSendMessageInput{Message: "ping"})
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "plugin not loaded")
+	})
+}
+
+func TestHandleASSSetVariables(t *testing.T) {
+	t.Run("sets all variables in order", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		input := ASSSetVariablesInput{
+			Variables: []ASSVariableInput{
+				{Name: "kill_type", Value: "penta"},
+				{Name: "milestone", Value: "100_kills"},
+			},
+		}
+		_, result, err := server.handleASSSetVariables(context.Background(), nil, input)
+
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+
+		_, _, _, varsSet := mock.GetASSCalls()
+		require.Len(t, varsSet, 2)
+		assert.Equal(t, "kill_type", varsSet[0].Name)
+		assert.Equal(t, "penta", varsSet[0].Value)
+		assert.Equal(t, "milestone", varsSet[1].Name)
+		assert.Equal(t, "100_kills", varsSet[1].Value)
+	})
+
+	t.Run("coerces non-string values to strings", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		input := ASSSetVariablesInput{
+			Variables: []ASSVariableInput{
+				{Name: "kill_count", Value: 42},
+				{Name: "is_live", Value: true},
+				{Name: "cleared", Value: nil},
+			},
+		}
+		_, _, err := server.handleASSSetVariables(context.Background(), nil, input)
+
+		require.NoError(t, err)
+		_, _, _, varsSet := mock.GetASSCalls()
+		require.Len(t, varsSet, 3)
+		assert.Equal(t, "42", varsSet[0].Value)   // int coerced to string
+		assert.Equal(t, "true", varsSet[1].Value) // bool coerced to string
+		assert.Equal(t, "", varsSet[2].Value)     // nil coerced to ""
+	})
+
+	t.Run("rejects empty variables list", func(t *testing.T) {
+		server, _ := testServer(t)
+
+		_, _, err := server.handleASSSetVariables(context.Background(), nil, ASSSetVariablesInput{Variables: nil})
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must not be empty")
+	})
+
+	t.Run("rejects blank variable name", func(t *testing.T) {
+		server, _ := testServer(t)
+
+		input := ASSSetVariablesInput{
+			Variables: []ASSVariableInput{{Name: "", Value: "oops"}},
+		}
+		_, _, err := server.handleASSSetVariables(context.Background(), nil, input)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "name must not be empty")
+	})
+
+	t.Run("propagates OBS error", func(t *testing.T) {
+		server, mock := testServer(t)
+		mock.SetASSError("set_variables", errors.New("plugin not loaded"))
+
+		input := ASSSetVariablesInput{
+			Variables: []ASSVariableInput{{Name: "x", Value: "1"}},
+		}
+		_, _, err := server.handleASSSetVariables(context.Background(), nil, input)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "plugin not loaded")
+	})
+}
+
+func TestHandleASSSetVariable(t *testing.T) {
+	t.Run("delegates to set_variables with single entry", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		input := ASSSetVariableInput{Name: "active_persona", Value: "sonic"}
+		_, result, err := server.handleASSSetVariable(context.Background(), nil, input)
+
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+
+		_, _, _, varsSet := mock.GetASSCalls()
+		require.Len(t, varsSet, 1)
+		assert.Equal(t, "active_persona", varsSet[0].Name)
+		assert.Equal(t, "sonic", varsSet[0].Value)
+	})
+}
