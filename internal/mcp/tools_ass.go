@@ -58,9 +58,15 @@ func coerceASSVariables(in []ASSVariableInput) ([]obs.ASSVariable, error) {
 		if v.Name == "" {
 			return nil, fmt.Errorf("variables[%d].name must not be empty", i)
 		}
+		var strVal string
+		if v.Value == nil {
+			strVal = ""
+		} else {
+			strVal = fmt.Sprintf("%v", v.Value)
+		}
 		out = append(out, obs.ASSVariable{
 			Name:  v.Name,
-			Value: fmt.Sprintf("%v", v.Value),
+			Value: strVal,
 		})
 	}
 	return out, nil
