@@ -1,4 +1,4 @@
-# Design: ASS Skill + Gap Closure
+# Design: Advanced Scene Switcher Skill + Gap Closure
 
 **Date:** 2026-05-29  
 **Scope:** agentic-obs `feat/fb-51-ass-tool-group` branch  
@@ -11,11 +11,11 @@
 agentic-obs was forked to add Advanced Scene Switcher (ASS) plugin support (4 new tools: `ass_run_macro`, `ass_send_message`, `ass_set_variables`, `ass_set_variable`). The implementation stack is complete (obs layer, MCP handlers, interface, mock, storage, config) but four gaps remain before the feature is shippable:
 
 1. No MCP-layer handler tests
-2. No Claude Skill for ASS
+2. No Claude Skill for Advanced Scene Switcher
 3. Stale tool count in `CLAUDE.md`
 4. `nil` value coercion bug in `coerceASSVariables`
 
-The MCP server is intended as the **primary driver for OBS-related scripting**, with ASS as the reaction engine. Primary consumer context: League of Legends streaming (kill-type overlays, auto-clips, camera zoom triggers, milestone alerts) and Twitch-WhisperPy persona automation.
+The MCP server is intended as the **primary driver for OBS-related scripting**, with Advanced Scene Switcher as the reaction engine. Primary consumer context: League of Legends streaming (kill-type overlays, auto-clips, camera zoom triggers, milestone alerts) and Twitch-WhisperPy persona automation.
 
 ---
 
@@ -47,27 +47,27 @@ The MCP server is intended as the **primary driver for OBS-related scripting**, 
 
 ---
 
-## Gap 2: ASS Skill
+## Gap 2: Advanced Scene Switcher Skill
 
 **File:** `skills/advanced-scene-switcher/SKILL.md`  
-**Model:** Condition/action — MCP is the signal source, ASS is the reaction engine.
+**Model:** Condition/action — MCP is the signal source, Advanced Scene Switcher is the reaction engine.
 
 ### Structure
 
 **1. When to Use This Skill**  
-Trigger phrases ("run my macro", "set the ASS variable", "trigger the scene automation", "send a message to ASS") and the general case: whenever you want OBS to react to an event originating outside OBS — game state, audio triggers, Riot API data, bot keywords, screenshot parse results.
+Trigger phrases ("run my macro", "set an Advanced Scene Switcher variable", "trigger the scene automation", "send a message to Advanced Scene Switcher") and the general case: whenever you want OBS to react to an event originating outside OBS — game state, audio triggers, Riot API data, bot keywords, screenshot parse results.
 
 **2. The Condition/Action Model**  
 One prose diagram:
-- *Conditions* live in ASS and evaluate on a poll loop (variables, websocket messages, scene state)
-- *Actions* are the macros ASS fires when conditions match
+- *Conditions* live in Advanced Scene Switcher and evaluate on a poll loop (variables, websocket messages, scene state)
+- *Actions* are the macros Advanced Scene Switcher fires when conditions match
 - *MCP's role* is to push inputs: set variables, send messages, or trigger macros directly when the target is known
 
-This is the loop: external event → MCP tool call → ASS state change → ASS condition match → macro fires → OBS effect.
+This is the loop: external event → MCP tool call → Advanced Scene Switcher state change → condition match → macro fires → OBS effect.
 
 **3. Tool Decision Logic**  
 - Know exactly which macro to fire → `ass_run_macro` (set variables atomically via the `variables` field if needed)
-- Push state and let ASS conditions decide → `ass_set_variable` / `ass_set_variables`
+- Push state and let Advanced Scene Switcher conditions decide → `ass_set_variable` / `ass_set_variables`
 - Fan-out: multiple macros should react to the same event → `ass_send_message`
 
 **4. Patterns with examples**  
@@ -84,13 +84,13 @@ Drawn from project use cases:
 
 **5. Constraints**  
 - Fire-and-forget: no introspection (cannot list macros or variables — caller must know names)
-- Macro names and variable names are case-sensitive; must match ASS config exactly
+- Macro names and variable names are case-sensitive; must match Advanced Scene Switcher config exactly
 - All variable values are coerced to strings on the wire (numbers and bools are accepted by the tools and converted)
-- ASS rejects unknown macros gracefully (no error return)
+- Advanced Scene Switcher rejects unknown macros gracefully (no error return)
 
 **6. Integration with Other Skills**  
 - **streaming-assistant** may hand off to this skill when the user wants event-driven OBS behavior rather than one-shot tool calls
-- agentic-obs *automation rules* (internal, `create_automation_rule`) and ASS macros (OBS plugin) are complementary: automation rules operate on OBS events inside agentic-obs; ASS macros operate on conditions inside OBS itself
+- agentic-obs *automation rules* (internal, `create_automation_rule`) and Advanced Scene Switcher macros (OBS plugin) are complementary: automation rules operate on OBS events inside agentic-obs; Advanced Scene Switcher macros operate on conditions inside OBS itself
 
 ### Additional required changes
 - Add `advanced-scene-switcher` to `EXPECTED_SKILLS` in `scripts/verify-skills.sh` (4 → 5)
@@ -114,7 +114,7 @@ Drawn from project use cases:
 
 **File:** `internal/mcp/tools_ass.go`, `coerceASSVariables` function  
 
-**Problem:** `fmt.Sprintf("%v", nil)` produces the string `"<nil>"`. If the LLM passes JSON `null` as a variable value, ASS receives `"<nil>"` instead of `""`.
+**Problem:** `fmt.Sprintf("%v", nil)` produces the string `"<nil>"`. If the LLM passes JSON `null` as a variable value, Advanced Scene Switcher receives `"<nil>"` instead of `""`.
 
 **Fix:** Add an explicit nil check before the `fmt.Sprintf` call:
 
