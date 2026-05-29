@@ -6,7 +6,7 @@ Context for AI assistants working on the agentic-obs project.
 
 **agentic-obs** is an MCP (Model Context Protocol) server providing AI assistants with programmatic control over OBS Studio via the WebSocket API.
 
-**Current Status:** 83 Tools | 4 Resources | 14 Prompts | 4 Skills
+**Current Status:** 87 Tools | 4 Resources | 14 Prompts | 6 Skills
 
 ## Project Structure
 
@@ -184,6 +184,7 @@ go mod tidy
 | Filters | 7 | `list_source_filters`, `toggle_source_filter` |
 | Transitions | 5 | `list_transitions`, `set_current_transition` |
 | Automation | 9 | `list_automation_rules`, `create_automation_rule`, `trigger_automation_rule` |
+| AdvancedSceneSwitcher | 4 | `ass_run_macro`, `ass_send_message`, `ass_set_variables`, `ass_set_variable` |
 | Meta | 4 | `help`, `get_tool_config`, `set_tool_config`, `list_tool_groups` (always enabled) |
 
 ### Resources (4 types)
@@ -242,4 +243,4 @@ For detailed rationale, see [design/decisions/](design/decisions/).
 
 ---
 
-**Last Updated:** 2025-12-19 | **Go:** 1.25.5 | **MCP SDK:** 1.5.0 | **goobs:** 1.8.3
+**Last Updated:** 2026-05-29 | **Go:** 1.25.5 | **MCP SDK:** 1.5.0 | **goobs:** 1.8.3
