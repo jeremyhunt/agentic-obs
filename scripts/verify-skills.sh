@@ -20,6 +20,7 @@ EXPECTED_SKILLS=(
     "audio-engineer"
     "preset-manager"
     "studio-mode-operator"
+    "advanced-scene-switcher"
 )
 
 # Required frontmatter fields
@@ -44,6 +45,7 @@ echo "  - streaming-assistant"
 echo "  - scene-designer"
 echo "  - audio-engineer"
 echo "  - preset-manager"
+echo "  - advanced-scene-switcher"
 echo ""
 
 ISSUES_FOUND=0
