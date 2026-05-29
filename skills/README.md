@@ -158,6 +158,24 @@ only incidentally touch studio mode.
 
 ---
 
+### 6. Advanced Scene Switcher (`advanced-scene-switcher`)
+
+**When to use**: Triggering Advanced Scene Switcher macros, pushing plugin variables, broadcasting websocket messages to OBS automation
+
+**Key capabilities**:
+- Direct macro triggering with optional atomic variable pre-set
+- Plugin variable updates (single or bulk) to drive condition-based automation
+- Websocket message broadcast for fan-out to multiple macros
+- Condition/action mental model: MCP pushes state, Advanced Scene Switcher reacts
+- League of Legends streaming examples: kill-type overlays, milestone alerts, auto-clips
+- WhisperPy persona automation: active_persona variable, speaking-state macros
+
+**Tools used**: `ass_run_macro`, `ass_send_message`, `ass_set_variables`, `ass_set_variable`
+
+**Best for**: Users who have Advanced Scene Switcher macros configured in OBS and want the MCP server to drive them from external events (game state, bot audio, Riot API data, screenshot parse results).
+
+---
+
 ## Skill Selection Guide
 
 Claude will automatically select the appropriate skill based on your request. However, you can explicitly invoke a skill:
@@ -178,6 +196,8 @@ Claude will automatically select the appropriate skill based on your request. Ho
 | "Add chroma key to my webcam" | `scene-designer` (filters) |
 | "Enable studio mode and rehearse the transition" | `studio-mode-operator` |
 | "Fade to the Intermission scene over 800ms" | `studio-mode-operator` |
+| "Run my pentakill macro" | `advanced-scene-switcher` |
+| "Set the kill_type variable to penta" | `advanced-scene-switcher` |
 
 ## Using Skills Effectively
 
