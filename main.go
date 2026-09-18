@@ -113,14 +113,35 @@ func main() {
 	}()
 
 	// Step 4: Connect to OBS with retry logic
-	log.Println("[4/5] Connecting to OBS WebSocket...")
+	//
+	// A failure here is NOT fatal. Every tool already guards on
+	// IsConnected() (see internal/mcp/status_provider.go) and the client runs
+	// a background reconnect monitor, so the server is designed to run with
+	// OBS absent -- it just has to actually reach Run() to do so. Exiting
+	// instead meant that starting an MCP client before OBS left a dead server
+	// for that client's whole session, with no way to recover but a restart.
+	log.Println("[4/5] Starting services and connecting to OBS WebSocket...")
+
+	// Local subsystems first: none of them need OBS, and they must come up
+	// even when it is missing. A failure here IS fatal -- it is a local fault,
+	// not a recoverable one.
+	if err := server.StartServices(); err != nil {
+		log.Fatalf("FATAL: Failed to start server services: %v", err)
+	}
+
+	obsConnected := true
 	if err := connectToOBSWithRetry(server, cfg, ctx); err != nil {
-		log.Fatalf("FATAL: Failed to establish OBS connection: %v", err)
+		obsConnected = false
+		log.Printf("WARNING: %v", err)
+		log.Println("Serving anyway; the client will reconnect when OBS becomes available.")
+		log.Println("OBS tools will report 'not connected' until then.")
 	}
 
 	// Record successful connection in storage
-	if err := recordSuccessfulConnection(ctx, cfg); err != nil {
-		log.Printf("Warning: Failed to record successful connection: %v", err)
+	if obsConnected {
+		if err := recordSuccessfulConnection(ctx, cfg); err != nil {
+			log.Printf("Warning: Failed to record successful connection: %v", err)
+		}
 	}
 
 	// Step 5: Start MCP server and setup event loop
@@ -209,21 +230,35 @@ func checkFirstRun(ctx context.Context, dbPath string) (bool, error) {
 	return db.IsFirstRun(ctx)
 }
 
-// connectToOBSWithRetry attempts to connect to OBS with retry logic and user prompting
+// connectToOBSWithRetry attempts to connect to OBS a few times before giving up.
+//
+// It must never read stdin or write to stdout. This process speaks the MCP
+// protocol over stdio: stdout IS the JSON-RPC channel and stdin IS the client's
+// request stream. An earlier version ended with
+//
+//	fmt.Print("Would you like to reconfigure OBS connection settings? (y/n): ")
+//	fmt.Scanln(&response)
+//
+// which, whenever OBS happened not to be running yet, printed that prompt into
+// the JSON-RPC stream and then swallowed the client's `initialize` message with
+// Scanln. The client saw a corrupt stream and a closed connection, and the
+// server stayed dead for that whole session. Diagnostics go to stderr via log;
+// reconfiguration belongs to the TUI, which owns a real terminal.
 func connectToOBSWithRetry(server *mcp.Server, cfg *config.Config, ctx context.Context) error {
 	const maxRetries = 3
 	retryDelay := 2 * time.Second
 
+	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		log.Printf("Connection attempt %d/%d to OBS at %s:%s...", attempt, maxRetries, cfg.OBSHost, cfg.OBSPort)
 
-		err := server.Start()
-		if err == nil {
+		lastErr = server.ConnectOBS()
+		if lastErr == nil {
 			log.Println("Successfully connected to OBS!")
 			return nil
 		}
 
-		log.Printf("Connection failed: %v", err)
+		log.Printf("Connection failed: %v", lastErr)
 
 		// If this isn't the last attempt, wait before retrying
 		if attempt < maxRetries {
@@ -232,49 +267,16 @@ func connectToOBSWithRetry(server *mcp.Server, cfg *config.Config, ctx context.C
 		}
 	}
 
-	// All automatic retries failed - prompt user for configuration
 	log.Println("========================================")
 	log.Println("Failed to connect to OBS after multiple attempts.")
 	log.Println("This could mean:")
 	log.Println("  1. OBS Studio is not running")
 	log.Println("  2. OBS WebSocket server is not enabled")
 	log.Println("  3. Connection details are incorrect")
+	log.Printf("  Run '%s --tui' to review or change the connection settings.", os.Args[0])
 	log.Println("========================================")
-	fmt.Print("\nWould you like to reconfigure OBS connection settings? (y/n): ")
 
-	var response string
-	fmt.Scanln(&response)
-
-	if response == "y" || response == "Y" || response == "yes" {
-		// Prompt for new configuration
-		if err := cfg.DetectOrPrompt(); err != nil {
-			return fmt.Errorf("failed to get new configuration: %w", err)
-		}
-
-		// Validate and save new configuration
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid configuration: %w", err)
-		}
-
-		if err := config.SaveToStorage(ctx, cfg); err != nil {
-			log.Printf("Warning: failed to save new configuration: %v", err)
-		}
-
-		// Try connecting with new configuration
-		log.Println("Attempting to connect with new configuration...")
-
-		// Need to recreate server with new config
-		// For now, just try to start with existing server
-		// (In a real implementation, you might want to update the OBS client configuration)
-		if err := server.Start(); err != nil {
-			return fmt.Errorf("connection failed with new configuration: %w\nPlease verify OBS is running and WebSocket server is enabled", err)
-		}
-
-		log.Println("Successfully connected to OBS with new configuration!")
-		return nil
-	}
-
-	return fmt.Errorf("OBS connection failed and user declined reconfiguration")
+	return lastErr
 }
 
 // recordSuccessfulConnection records the successful OBS connection timestamp in storage
