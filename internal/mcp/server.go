@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -257,14 +258,20 @@ func NewServer(config ServerConfig) (*Server, error) {
 	return s, nil
 }
 
-// Start establishes OBS connection and starts background services
-func (s *Server) Start() error {
-	// Connect to OBS
-	if err := s.obsClient.Connect(); err != nil {
-		return fmt.Errorf("failed to connect to OBS: %w", err)
-	}
-	log.Println("Connected to OBS successfully")
+// ErrOBSUnavailable reports that OBS could not be reached. It is deliberately
+// distinguishable from every other startup failure: a missing OBS is a
+// RECOVERABLE state (the client reconnects in the background, and every tool
+// already guards on IsConnected), whereas a local subsystem failing to start is
+// not. Callers use errors.Is to tell "serve anyway" from "give up".
+var ErrOBSUnavailable = errors.New("OBS is not reachable")
 
+// StartServices starts the local background subsystems: the screenshot HTTP
+// server, the screenshot worker pool and the automation engine.
+//
+// None of these need OBS. They are separate from ConnectOBS so that a missing
+// OBS cannot take them down with it -- when the two were one method, an
+// unreachable OBS returned before any of this ran.
+func (s *Server) StartServices() error {
 	// Start HTTP server for screenshot serving (if enabled)
 	if s.httpServer != nil {
 		if err := s.httpServer.Start(); err != nil {
@@ -292,6 +299,30 @@ func (s *Server) Start() error {
 	}
 
 	return nil
+}
+
+// ConnectOBS attempts a single connection to OBS. A failure is wrapped in
+// ErrOBSUnavailable so callers can retry or carry on rather than abort.
+//
+// Safe to call repeatedly: obs.Client.Connect is a no-op when already
+// connected, which is what makes retrying from the caller cheap.
+func (s *Server) ConnectOBS() error {
+	if err := s.obsClient.Connect(); err != nil {
+		return fmt.Errorf("%w: %v", ErrOBSUnavailable, err)
+	}
+	log.Println("Connected to OBS successfully")
+	return nil
+}
+
+// Start brings up the local services and then connects to OBS.
+//
+// A returned error wrapping ErrOBSUnavailable means the server is up and
+// usable but OBS-backed tools are not; any other error means startup failed.
+func (s *Server) Start() error {
+	if err := s.StartServices(); err != nil {
+		return err
+	}
+	return s.ConnectOBS()
 }
 
 // Run starts the MCP server and blocks until context is cancelled
