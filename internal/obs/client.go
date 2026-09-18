@@ -3,7 +3,9 @@ package obs
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/andreykaipov/goobs"
@@ -22,9 +24,10 @@ type Client struct {
 	client *goobs.Client
 
 	// Connection state
-	mu        sync.RWMutex
-	connected bool
-	reconnect bool // Whether to attempt auto-reconnect
+	mu             sync.RWMutex
+	connected      bool
+	reconnect      bool        // Whether to attempt auto-reconnect
+	monitorStarted atomic.Bool // Guards the single monitorConnection goroutine
 
 	// Event handlers
 	eventCallback EventCallback
@@ -113,6 +116,18 @@ func (c *Client) Connect() error {
 		return nil // Already connected
 	}
 
+	// Arm the reconnect monitor on the FIRST attempt, before it can fail.
+	//
+	// It used to be started further down, only after a connection succeeded,
+	// so a first attempt against an OBS that wasn't running yet left nothing
+	// watching: the client stayed dead until the process restarted, even once
+	// OBS came up seconds later. The compare-and-swap keeps repeated Connect
+	// calls (the caller's retries, and the monitor's own) from spawning more
+	// goroutines.
+	if c.reconnect && c.monitorStarted.CompareAndSwap(false, true) {
+		go c.monitorConnection()
+	}
+
 	address := fmt.Sprintf("%s:%s", c.host, c.port)
 
 	var client *goobs.Client
@@ -150,10 +165,8 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("failed to set up OBS event handlers: %w", err)
 	}
 
-	// Start auto-reconnect monitor if enabled
-	if c.reconnect {
-		go c.monitorConnection()
-	}
+	// The reconnect monitor is armed at the top of this method, not here --
+	// see the comment there for why.
 
 	return nil
 }
@@ -163,11 +176,19 @@ func (c *Client) Disconnect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Stand the monitor down FIRST, before the already-disconnected shortcut.
+	//
+	// Disconnect means "stop, and stay stopped". Clearing this only on the
+	// connected path meant that a client which had never managed to connect
+	// ignored Disconnect entirely and kept retrying in the background -- which
+	// went unnoticed while the monitor was armed only after a SUCCESSFUL
+	// connect, and became reachable the moment it was armed on the first
+	// attempt instead.
+	c.reconnect = false
+
 	if !c.connected {
 		return nil // Already disconnected
 	}
-
-	c.reconnect = false // Disable auto-reconnect
 
 	if c.client != nil {
 		if err := c.client.Disconnect(); err != nil {
@@ -259,13 +280,17 @@ func (c *Client) monitorConnection() {
 			c.mu.RUnlock()
 
 			if shouldReconnect {
-				// Attempt reconnection
+				// Attempt reconnection.
+				//
+				// log (stderr), never fmt.Print (stdout): this process speaks
+				// MCP over stdio, so anything written to stdout lands in the
+				// JSON-RPC stream. With OBS down this branch runs every 5s,
+				// which made a dropped connection corrupt the protocol
+				// continuously rather than just once.
 				if err := c.Connect(); err != nil {
-					// Log error but continue trying
-					// In production, you might want to use a proper logger here
-					fmt.Printf("Auto-reconnect failed: %v\n", err)
+					log.Printf("Auto-reconnect failed: %v", err)
 				} else {
-					fmt.Println("Successfully reconnected to OBS")
+					log.Println("Successfully reconnected to OBS")
 				}
 			} else {
 				// Perform health check on connected client
@@ -283,7 +308,7 @@ func (c *Client) monitorConnection() {
 							c.client = nil
 						}
 						c.mu.Unlock()
-						fmt.Printf("OBS connection lost: %v\n", err)
+						log.Printf("OBS connection lost: %v", err)
 					}
 				}
 			}
