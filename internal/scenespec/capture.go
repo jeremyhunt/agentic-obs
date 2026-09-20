@@ -3,8 +3,6 @@ package scenespec
 import (
 	"fmt"
 
-	"github.com/andreykaipov/goobs/api/typedefs"
-
 	"github.com/ironystock/agentic-obs/internal/obs"
 )
 
@@ -21,7 +19,6 @@ type Reader interface {
 	GetSourceSettings(sourceName string) (map[string]interface{}, error)
 	GetSourceFilterList(sourceName string) ([]obs.FilterInfo, error)
 	GetSourceFilter(sourceName, filterName string) (*obs.FilterDetails, error)
-	ListSources() ([]*typedefs.Input, error)
 }
 
 // Capture reads a scene and returns it as a document.
@@ -68,11 +65,6 @@ func CaptureWith(client Reader, sceneName string, opts Options) (*Spec, error) {
 		spec.Omitted = append(spec.Omitted, "filters")
 	}
 
-	kinds, err := inputKinds(client)
-	if err != nil {
-		return nil, err
-	}
-
 	captured := map[string]bool{}
 	occurrences := map[string]int{}
 
@@ -84,7 +76,7 @@ func CaptureWith(client Reader, sceneName string, opts Options) (*Spec, error) {
 		}
 		captured[placed.Name] = true
 
-		source, err := captureSource(client, placed, kinds, opts)
+		source, err := captureSource(client, placed, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -103,6 +95,7 @@ func placement(client Reader, sceneName string, placed obs.SceneSource, order in
 		Order:       order,
 		Enabled:     placed.Enabled,
 		Locked:      placed.Locked,
+		BlendMode:   placed.BlendMode,
 	}
 	occurrences[placed.Name]++
 
@@ -123,14 +116,15 @@ func placement(client Reader, sceneName string, placed obs.SceneSource, order in
 
 // captureSource records what a source is, branching on which of the three kinds
 // of thing it turns out to be.
-func captureSource(client Reader, placed obs.SceneSource, kinds map[string]string, opts Options) (SourceSpec, error) {
-	source := SourceSpec{Name: placed.Name, Type: sourceTypeOf(placed, kinds)}
+func captureSource(client Reader, placed obs.SceneSource, opts Options) (SourceSpec, error) {
+	source := SourceSpec{Name: placed.Name, UUID: placed.UUID, Type: sourceTypeOf(placed)}
 
 	switch source.Type {
 	case SourceInput:
-		// The kind is not optional: without it an apply cannot create the
-		// input, and it costs nothing -- it came from the one ListSources call.
-		source.Kind = kinds[placed.Name]
+		// The kind is not optional -- without it an apply cannot create the
+		// input -- and it costs nothing, because GetSceneItemList already
+		// returned it on the item.
+		source.Kind = placed.Kind
 
 		if opts.IncludeSettings {
 			settings, err := client.GetSourceSettings(placed.Name)
@@ -158,6 +152,7 @@ func captureSource(client Reader, placed obs.SceneSource, kinds map[string]strin
 				Order:       order,
 				Enabled:     child.Enabled,
 				Locked:      child.Locked,
+				BlendMode:   child.BlendMode,
 			})
 			occurrences[child.Name]++
 		}
@@ -215,36 +210,12 @@ func captureFilters(client Reader, sourceName string) ([]FilterSpec, error) {
 // OBS_SOURCE_TYPE_SCENE, so isGroup has to be checked first; branching on the
 // type alone sends a group down the scene path, where GetSceneItemList refuses
 // it.
-func sourceTypeOf(placed obs.SceneSource, kinds map[string]string) string {
+func sourceTypeOf(placed obs.SceneSource) string {
 	if placed.IsGroup {
 		return SourceGroup
 	}
 	if placed.Type == "OBS_SOURCE_TYPE_SCENE" {
 		return SourceScene
 	}
-	if _, isInput := kinds[placed.Name]; isInput {
-		return SourceInput
-	}
-	// A placement that is in no input list and is not typed as a scene is
-	// something this build does not model. Treating it as an input is the
-	// recoverable guess: the kind comes out empty and an apply reports it,
-	// rather than the capture inventing a container.
 	return SourceInput
-}
-
-// inputKinds maps input name to kind, in one call rather than one per source.
-func inputKinds(client Reader) (map[string]string, error) {
-	inputs, err := client.ListSources()
-	if err != nil {
-		return nil, fmt.Errorf("listing inputs: %w", err)
-	}
-
-	kinds := make(map[string]string, len(inputs))
-	for _, in := range inputs {
-		if in == nil {
-			continue
-		}
-		kinds[in.InputName] = in.InputKind
-	}
-	return kinds, nil
 }

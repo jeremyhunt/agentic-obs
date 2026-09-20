@@ -43,6 +43,18 @@ type SceneSource struct {
 	// so this is the only field that tells them apart -- and they need
 	// different requests to read their contents.
 	IsGroup bool `json:"is_group"`
+
+	// UUID is the source's stable identity. A name can change; this does not,
+	// which is the only way to tell a rename from a delete-and-create.
+	UUID string `json:"uuid,omitempty"`
+
+	// Kind is the input kind ("browser_source", ...), empty for scenes and
+	// groups. It arrives with every scene item, so reading it here saves
+	// enumerating every input just to look one up.
+	Kind string `json:"kind,omitempty"`
+
+	// BlendMode is how the placement composites, e.g. OBS_BLEND_NORMAL.
+	BlendMode string `json:"blend_mode,omitempty"`
 }
 
 // RecordingStatus represents the current recording state.
@@ -182,7 +194,10 @@ func sceneSourceFromItem(item typedefs.SceneItem) SceneSource {
 		// "OBS_SOURCE_TYPE_SCENE", so this flag is the only thing that tells a
 		// caller which of the two it is holding -- and they need different
 		// requests to read their contents.
-		IsGroup: item.IsGroup,
+		IsGroup:   item.IsGroup,
+		UUID:      item.SourceUuid,
+		Kind:      item.InputKind,
+		BlendMode: item.SceneItemBlendMode,
 	}
 
 	// Extract transform information (always available as a struct)

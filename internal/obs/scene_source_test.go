@@ -44,12 +44,15 @@ func TestSceneSourceFromItemCarriesVisibility(t *testing.T) {
 // walk fails the moment a new field is not carried, which is the whole point.
 func TestSceneSourceFromItemCopiesEveryField(t *testing.T) {
 	got := sceneSourceFromItem(typedefs.SceneItem{
-		SceneItemID:      42,
-		SourceName:       "StartingSoon_Room",
-		SourceType:       "OBS_SOURCE_TYPE_INPUT",
-		SceneItemEnabled: true,
-		SceneItemLocked:  true,
-		IsGroup:          true,
+		SceneItemID:        42,
+		SourceName:         "StartingSoon_Room",
+		SourceType:         "OBS_SOURCE_TYPE_INPUT",
+		SceneItemEnabled:   true,
+		SceneItemLocked:    true,
+		IsGroup:            true,
+		SourceUuid:         "7f3b6da3-9dc8-47a1-a544-e950ef997f4f",
+		InputKind:          "browser_source",
+		SceneItemBlendMode: "OBS_BLEND_MULTIPLY",
 		SceneItemTransform: typedefs.SceneItemTransform{
 			PositionX: 120, PositionY: 80,
 			Width: 1920, Height: 1080,
@@ -88,10 +91,46 @@ func TestSceneSourceFromItemCopiesEveryField(t *testing.T) {
 		{"ScaleY", got.ScaleY, 2.5},
 		{"Rotation", got.Rotation, 45.0},
 		{"IsGroup", got.IsGroup, true},
+		{"UUID", got.UUID, "7f3b6da3-9dc8-47a1-a544-e950ef997f4f"},
+		{"Kind", got.Kind, "browser_source"},
+		{"BlendMode", got.BlendMode, "OBS_BLEND_MULTIPLY"},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
 			t.Errorf("%s: got %v, want %v", c.field, c.got, c.want)
 		}
+	}
+}
+
+// TestSceneSourceCarriesWhatTheItemListAlreadyKnows pins three fields that were
+// available for free and being dropped.
+//
+// GetSceneItemList returns sourceUuid, inputKind and sceneItemBlendMode on every
+// item. Without them a capture had to call ListSources separately just to learn
+// an input's kind, a rename was undetectable, and blend mode was invisible.
+//
+// The reflective guard above cannot catch this class: it checks that every field
+// SceneSource *has* was carried, not that SceneSource has every field the item
+// offers. That is a real limit, and this test is the answer to it.
+func TestSceneSourceCarriesWhatTheItemListAlreadyKnows(t *testing.T) {
+	got := sceneSourceFromItem(typedefs.SceneItem{
+		SceneItemID:        9,
+		SourceName:         "OVERLAY_NowPlaying",
+		SourceType:         "OBS_SOURCE_TYPE_INPUT",
+		SourceUuid:         "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+		InputKind:          "browser_source",
+		SceneItemBlendMode: "OBS_BLEND_MULTIPLY",
+	})
+
+	if got.UUID != "a1b2c3d4-e5f6-7890-1234-567890abcdef" {
+		t.Errorf("UUID is %q; without it a renamed source is indistinguishable from "+
+			"one deleted and another created", got.UUID)
+	}
+	if got.Kind != "browser_source" {
+		t.Errorf("Kind is %q; it arrives with every item, so fetching it separately "+
+			"is a round trip for something already in hand", got.Kind)
+	}
+	if got.BlendMode != "OBS_BLEND_MULTIPLY" {
+		t.Errorf("BlendMode is %q", got.BlendMode)
 	}
 }

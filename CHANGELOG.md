@@ -7,6 +7,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Scene specs, diff (FB-83)** — `diff_scene_spec` compares a captured spec
+  against the live scene and classifies each difference as `drift`, `missing`,
+  `unmanaged`, `kind_mismatch` or `renamed`. It is read-only, and the findings
+  are exactly what an apply would act on, so a diff is also the dry run. The
+  taxonomy is the substance: each kind needs a different answer, and collapsing
+  them into "different" loses that. `unmanaged` is left alone by default because
+  a scene almost always holds things the spec was never meant to own;
+  `kind_mismatch` is never treated as drift because no write reconciles it —
+  recreating the source is the only fix and it destroys every placement.
+
+  **Most of the work is in not reporting things.** Against a real OBS, a naive
+  comparison is wrong in four separate ways, and a diff that cries wolf gets
+  ignored exactly when it matters:
+
+  - `GetInputSettings` returns only what *differs* from the kind's defaults, so a
+    spec storing a value equal to a default reads as "spec says X, live says
+    nothing". Defaults are merged into both sides first. This is the most common
+    false positive a settings diff can have — it fires on every source whose
+    document mentions a default.
+  - OBS stores transforms as **float32**, so a value sent as float64 comes back
+    rounded. Tolerances are per unit, because the units differ: 0.01 for position
+    and crop, 1e-4 for scale, 1e-3° for rotation. A hundredth of a pixel is
+    invisible; a hundredth of a scale factor is a 1% size change.
+  - Order is compared by the **relative rank of managed items**, never absolute
+    index. Anything unmanaged shifts every index below it, so an index comparison
+    reports the whole scene as drifted the moment someone adds an overlay.
+  - `1920` and `1920.0` are the same value. Every spec arriving over MCP has been
+    through JSON, which makes all its numbers float64.
+
+  Bounds dimensions are skipped under `OBS_BOUNDS_NONE`, where they are inert and
+  OBS reports zero for an item that never had a bounding box. A rename is matched
+  on uuid: without it a rename reads as one source missing and another unmanaged,
+  and acting on that would recreate the source and orphan the original.
+
+  **Verified against the live collection: all 11 scenes captured and immediately
+  diffed report zero findings**, while a 37px change is still reported. A diff is
+  refused for a spec captured from another scene, or captured with settings or
+  filters omitted — it would report everything it skipped as matching.
+
+### Changed
+- **`SceneSource` carries the uuid, input kind and blend mode that were already
+  on the wire (FB-83)** — `GetSceneItemList` returns `sourceUuid`, `inputKind`
+  and `sceneItemBlendMode` on every item, and all three were being discarded.
+  Without them a rename was undetectable, blend mode was invisible, and the
+  capture had to call `ListSources` separately just to learn an input's kind —
+  a round trip for something already in hand. That call is gone, and
+  `scenespec.Reader` is one method smaller.
+
+  The reflective guard added in FB-80 could not catch this: it checks that every
+  field `SceneSource` *has* was carried, not that `SceneSource` has every field
+  the item offers. That is a real limit of it, and a named test covers the gap.
+
 - **Scene specs, read side (FB-82)** — `internal/scenespec` captures a scene as
   a document and `capture_scene_spec` returns it inline. The spec separates what
   a source *is* from where it is *placed*, because OBS does: an input is a shared

@@ -201,6 +201,56 @@ var toolHelpContent = map[string]string{
 }`,
 
 	// Core - Status
+	"diff_scene_spec": `# diff_scene_spec
+
+**Category**: Layout
+
+**Description**: Compare a captured spec against the live scene and report what
+differs. Read-only: nothing here changes OBS, and the findings are exactly what
+an apply would act on, so a diff is the dry run.
+
+**Input**:
+- spec (object, required): A spec document, as returned by capture_scene_spec
+- scene_name (string, optional): Scene to compare against. Defaults to the scene
+  the spec was captured from
+
+**Output**: findings[], count, by_kind, matches (true when nothing differs).
+
+**The five kinds, and what each means for an apply**:
+- drift -- a managed value moved. An apply writes it back
+- missing -- in the spec, not in the scene. An apply creates it
+- unmanaged -- in the scene, not in the spec. An apply leaves it alone. A scene
+  almost always holds things the spec was never meant to own, and removing them
+  is the most destructive thing an apply can do
+- kind_mismatch -- a source's input kind changed. No write reconciles this;
+  recreating the source is the only fix and it destroys every placement
+- renamed -- the same source (matched on uuid) under a different name. Without
+  this a rename reads as one source missing and another unmanaged, and acting on
+  that would recreate the source and orphan the original
+
+**Most of the work is in what it does NOT report**:
+- A setting equal to its kind's default is absent from GetInputSettings, so a
+  spec storing that default would otherwise read as drift on every source
+- OBS stores transforms as float32, so a value sent as float64 returns rounded.
+  Tolerances: 0.01px position and crop, 1e-4 scale, 1e-3 degrees rotation
+- Order is compared by the relative rank of managed items, never absolute index.
+  Anything unmanaged shifts every index below it
+- Bounds dimensions are ignored under OBS_BOUNDS_NONE, where they are inert
+- 1920 and 1920.0 are the same value; a spec that has been through JSON carries
+  numbers as float64
+
+**Refused**: a spec captured from a different scene, and a spec captured with
+include_settings or include_filters off -- it would report everything it skipped
+as matching.
+
+**Examples**:
+- {"spec": {...}}
+- Against a different scene deliberately: {"spec": {...}, "scene_name": "Game"}
+
+**Tip**: Capture, edit the scene in OBS, then diff -- the findings name exactly
+what changed.
+`,
+
 	"capture_scene_spec": `# capture_scene_spec
 
 **Category**: Layout
