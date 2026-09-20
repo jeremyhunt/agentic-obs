@@ -39,6 +39,18 @@ func NewMockOBSClient() *MockOBSClient {
 	}
 }
 
+// CallVendorRequest records the vendor request a rule made. (FB-78)
+func (m *MockOBSClient) CallVendorRequest(vendorName, requestType string, data map[string]any) (map[string]any, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failNextCall {
+		m.failNextCall = false
+		return nil, assert.AnError
+	}
+	m.actions = append(m.actions, "call_vendor_request:"+vendorName+"/"+requestType)
+	return map[string]any{}, nil
+}
+
 func (m *MockOBSClient) SetCurrentScene(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
