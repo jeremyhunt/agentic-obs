@@ -43,6 +43,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   asserts exactly that group's tools disappear, which is the first end-to-end
   check of the gating ADR-004 describes. Previously the only tests compared one
   hand-typed number to another, which is why 81/83/85 could all coexist.
+- **`verify-docs.sh` reads its expected values from the Go constants (FB-52)** —
+  it previously declared its own `EXPECTED_TOOLS=81` and then "verified"
+  `HelpToolCount` against that literal, so the two had to be updated in lockstep
+  and the check could only ever confirm they matched each other. It now reads
+  `HelpToolCount`, `HelpResourceCount` and `HelpPromptCount` from
+  `internal/mcp/help_content.go` and checks the documentation against them; the
+  three self-comparing constant checks are gone.
 - **Documentation consistency now runs in Go CI (FB-52)** — tool counts and help
   entries live in Go source, so a Go-only change could break them without
   triggering the markdown-only `docs-check` workflow. `go.yml` now runs
