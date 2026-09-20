@@ -7,16 +7,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Environment variable aliases (FB-52)** — `OBS_WEBSOCKET_*` and `OBS_API_*` are
+  now accepted as aliases for `OBS_HOST`/`OBS_PORT`/`OBS_PASSWORD` when the
+  canonical name is unset, with the chosen source logged. Documented in the README.
+- **Help entries for all nine automation tools and `help` itself** — these were
+  never written, which went unnoticed because the Automation group was disabled in
+  the shipped binary (see Fixed).
 - Documentation restructuring with `design/` directory
 - Architecture Decision Records (ADRs)
 - docs-maintainer agent for documentation consistency
 - **`automation-setup` prompt (FB-20 follow-up)** — 14th MCP workflow prompt; guides users through creating, testing, and monitoring automation rules. Accepts optional `rule_type` ('event'|'schedule') and `trigger_event` arguments for targeted guidance.
 
 ### Fixed
+- **Automation tool group was disabled in every released binary (FB-52)** —
+  `main.go` copied eight of the nine `config.ToolGroups` fields into the MCP
+  server's config, silently omitting `Automation`. Because the zero value of a
+  bool is `false`, the automation engine was never constructed and its nine tools
+  were never registered outside of tests, which build `ServerConfig` directly. The
+  mapping is now a tested function; `TestToolGroupsFromConfigCopiesEveryField`
+  fails if a group is ever dropped again.
 - **Automation engine graceful shutdown** — `AutomationEngine.Stop()` now waits for in-flight event dispatch and rule execution goroutines via a `sync.WaitGroup`, preventing execution records from being stranded in the `running` status on restart.
 - **`delete_automation_rule` elicitation safety** — when the elicitation RPC itself errors, the handler now returns that error instead of silently falling through and deleting without user confirmation.
 
 ### Changed
+- **Documentation consistency now runs in Go CI (FB-52)** — tool counts and help
+  entries live in Go source, so a Go-only change could break them without
+  triggering the markdown-only `docs-check` workflow. `go.yml` now runs
+  `verify-docs.sh` and `verify-skills.sh`, and `docs-check.yml` also triggers on
+  `internal/mcp/**`.
+- **ADR list is discovered from disk (FB-52)** — `verify-docs.sh` no longer carries
+  a hardcoded ADR array that silently went stale (it stopped at 007 while 008
+  existed); it now enumerates `design/decisions/[0-9]*.md` and checks each is
+  indexed in the decisions README.
+- **`TestHelpContentCompleteness` derives its tool list (FB-52)** — it previously
+  checked a hand-written list of 56 names that labelled Core as "13 tools" when it
+  has 25, so it only covered tools someone remembered to add. It now iterates
+  `toolGroupMetadata` plus `MetaToolNames`.
 - **FB-15: mcpui-go extraction** - Extracted `pkg/mcpui/` to standalone module
   - New repository: [github.com/ironystock/mcpui-go](https://github.com/ironystock/mcpui-go)
   - Go SDK for MCP-UI protocol with 77.7% test coverage

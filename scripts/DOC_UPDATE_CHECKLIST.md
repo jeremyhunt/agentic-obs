@@ -8,7 +8,7 @@ Update these after each phase:
 
 | Metric | Current Value |
 |--------|---------------|
-| Tool Count | 45 |
+| Tool Count | see `HelpToolCount` in `internal/mcp/help_content.go` |
 | Resource Count | 4 |
 | Prompt Count | 13 |
 | API Endpoints | 8 |
@@ -30,7 +30,7 @@ Update these after each phase:
 
 - [ ] Architecture diagram reflects current state
 - [ ] MCP Resources section lists all 4 resource types
-- [ ] MCP Tools section lists all 45 tools by category
+- [ ] MCP Tools section lists every tool by category
 - [ ] MCP Prompts section lists all 13 prompts with arguments
 - [ ] Phase status in "Project Phases" section is current
 - [ ] "Last Updated" date is correct
@@ -54,7 +54,7 @@ Update these after each phase:
 
 ### 5. docs/TOOLS.md (Tool Reference)
 
-- [ ] Tool count in header is correct (45 tools)
+- [ ] Tool count in header matches `HelpToolCount`
 - [ ] All tools documented with examples
 - [ ] New tools have complete documentation (including help tool)
 - [ ] MCP Resources section is complete
@@ -80,12 +80,12 @@ Update these after each phase:
 - [ ] examples/prompts/README.md lists all prompt files
 - [ ] Workflow examples updated for new features
 
-### 9. internal/mcp/help.go (Embedded Help Content)
+### 9. internal/mcp/help_tools.go (Per-Tool Help Content)
 
-- [ ] Tool count matches expected (45 tools)
+- [ ] Tool count matches `HelpToolCount`
 - [ ] Resource count matches expected (4 resources)
 - [ ] Prompt count matches expected (13 prompts)
-- [ ] New tools have help entries in toolHelp map
+- [ ] New tools have entries in the `toolHelpContent` map (enforced by `TestHelpContentCompleteness`)
 - [ ] New prompts listed in prompts section
 - [ ] Prompt arguments section lists all prompt arguments
 
@@ -136,8 +136,9 @@ If you need to run checks manually:
 # Check for stale phase references (update "Phase 7" to current)
 grep -r "Phase [0-9] Complete" . --include="*.md" | grep -v "Phase 7"
 
-# Check for incorrect tool counts (update "45" to current)
-grep -rE "[0-9]+ (tools|Tools)" . --include="*.md" | grep -v "45"
+# Check for tool counts that disagree with HelpToolCount
+N=$(grep -oE 'HelpToolCount *= *[0-9]+' internal/mcp/help_content.go | grep -oE '[0-9]+$')
+grep -rE "[0-9]+ (tools|Tools)" . --include="*.md" | grep -v "$N"
 
 # Check for incorrect resource counts
 grep -rE "[0-9]+ (resources|Resources)" . --include="*.md" | grep -v "4"
@@ -195,7 +196,7 @@ After updates, verify:
 | design/ROADMAP.md | Future enhancements | Planned features, research |
 | design/decisions/*.md | ADRs | Technical decisions |
 | docs/README.md | Documentation index | Links, Categories, Resources, Prompts, API |
-| docs/TOOLS.md | Tool reference | All 45 tools with examples |
+| docs/TOOLS.md | Tool reference | Every tool with examples |
 | docs/TROUBLESHOOTING.md | Common issues | Connection, Web UI, audio |
 | docs/API.md | HTTP API reference | Endpoints, Validation, Security |
 | internal/mcp/help_content.go | Embedded help content | Tool counts, prompts, help text |

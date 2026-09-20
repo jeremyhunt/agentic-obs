@@ -41,8 +41,8 @@ Source of truth: `internal/mcp/help_content.go` constants. Counts here are a cac
 | Component | Technology | Version |
 |-----------|-----------|---------|
 | **Language** | Go | 1.25.5 |
-| **MCP SDK** | go-sdk | 1.1.0 |
-| **OBS Client** | goobs | 1.5.6 |
+| **MCP SDK** | go-sdk | 1.5.0 |
+| **OBS Client** | goobs | 1.8.3 |
 | **Database** | modernc.org/sqlite | latest |
 | **TUI** | bubbletea | 1.3.3 |
 

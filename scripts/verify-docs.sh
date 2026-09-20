@@ -158,22 +158,24 @@ done
 # Check ADRs exist
 echo ""
 echo "--- Architecture Decision Records ---"
-EXPECTED_ADRS=(
-    "design/decisions/001-sqlite-pure-go.md"
-    "design/decisions/002-obs-connection.md"
-    "design/decisions/003-scenes-as-resources.md"
-    "design/decisions/004-tool-groups.md"
-    "design/decisions/005-auth-storage.md"
-    "design/decisions/006-auto-detect-setup.md"
-    "design/decisions/007-web-ui-interfaces.md"
-)
+# ADRs are discovered from the directory rather than hardcoded. A hardcoded list
+# goes stale silently: ADR-008 existed while this script still stopped at 007.
+# Every numbered ADR must also be linked from the decisions README, which is what
+# actually makes it discoverable. (FB-52)
+ADR_FILES=$(find design/decisions -maxdepth 1 -name '[0-9]*.md' | sort)
 
-for adr in "${EXPECTED_ADRS[@]}"; do
-    echo -n "Checking: $adr exists... "
-    if [ -f "$adr" ]; then
+if [ -z "$ADR_FILES" ]; then
+    echo -e "${RED}No ADRs found under design/decisions/${NC}"
+    ISSUES_FOUND=1
+fi
+
+for adr in $ADR_FILES; do
+    adr_base=$(basename "$adr")
+    echo -n "Checking: $adr_base indexed in README... "
+    if grep -q "$adr_base" design/decisions/README.md; then
         echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}MISSING${NC}"
+        echo -e "${RED}NOT INDEXED${NC}"
         ISSUES_FOUND=1
     fi
 done
