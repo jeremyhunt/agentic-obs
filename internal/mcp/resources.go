@@ -503,3 +503,119 @@ func extractScreenshotURLNameFromURI(uri string) (string, error) {
 	}
 	return uri[len(ScreenshotURLURIPrefix):], nil
 }
+
+// sceneResourcesLocked returns the registry, creating it on first use. Callers
+// must hold sceneResourceMu. Server values are built as struct literals in
+// tests, so the map cannot be assumed initialised.
+func (s *Server) sceneResourcesLocked() map[string]bool {
+	if s.sceneResourceURIs == nil {
+		s.sceneResourceURIs = map[string]bool{}
+	}
+	return s.sceneResourceURIs
+}
+
+// syncSceneResources registers one concrete resource per scene.
+//
+// Scenes were served only by the obs://scene/{sceneName} template. A template is
+// not enumerable, so scenes never appeared in resources/list -- a client had to
+// already know a scene's name to ask about it -- and, more importantly, the SDK
+// emits notifications/resources/list_changed only from AddResource and
+// RemoveResources. Nothing called either, so creating or deleting a scene in OBS
+// told no one, while handleOBSEventNotification logged "Scene list changed"
+// under a comment asserting the SDK handled it automatically. (FB-66)
+//
+// The template is kept: it still serves reads for scenes registered between
+// syncs, and for anything reading a URI directly.
+//
+// Safe to call repeatedly. AddResource replaces a resource with the same URI, so
+// a reconnect re-syncs without duplicating anything.
+func (s *Server) syncSceneResources() {
+	// ConnectOBS is callable on a Server that has no MCP server attached yet --
+	// the connection and the protocol surface are set up independently, and a
+	// test doing only the former must not panic on the latter.
+	if s.obsClient == nil || s.mcpServer == nil {
+		return
+	}
+
+	scenes, _, err := s.obsClient.GetSceneList()
+	if err != nil {
+		log.Printf("Warning: could not enumerate scenes to register them as resources: %v", err)
+		return
+	}
+
+	known := make(map[string]bool, len(scenes))
+	for _, name := range scenes {
+		known[obs.GetResourceURIForScene(name)] = true
+		s.addSceneResource(name)
+	}
+
+	// Drop resources for scenes that disappeared while we were not listening --
+	// a scene collection switch, or events missed across a reconnect. A resource
+	// left behind for a scene that is gone is worse than a missing one: reading
+	// it fails against OBS while the listing insists it exists.
+	s.sceneResourceMu.Lock()
+	var stale []string
+	for uri := range s.sceneResourcesLocked() {
+		if !known[uri] {
+			stale = append(stale, uri)
+			delete(s.sceneResourcesLocked(), uri)
+		}
+	}
+	for uri := range known {
+		s.sceneResourcesLocked()[uri] = true
+	}
+	s.sceneResourceMu.Unlock()
+
+	if len(stale) > 0 {
+		s.mcpServer.RemoveResources(stale...)
+	}
+}
+
+// addSceneResource registers one scene as a concrete resource.
+func (s *Server) addSceneResource(sceneName string) {
+	if s.mcpServer == nil {
+		return
+	}
+
+	uri := obs.GetResourceURIForScene(sceneName)
+
+	s.sceneResourceMu.Lock()
+	already := s.sceneResourcesLocked()[uri]
+	s.sceneResourcesLocked()[uri] = true
+	s.sceneResourceMu.Unlock()
+
+	if already {
+		// Re-adding is harmless but notifies, which would make every reconnect
+		// look to a client like the scene list had changed.
+		return
+	}
+
+	s.mcpServer.AddResource(
+		&mcpsdk.Resource{
+			URI:         uri,
+			Name:        sceneName,
+			Description: fmt.Sprintf("OBS scene %q: sources, visibility and transforms", sceneName),
+			MIMEType:    "application/json",
+		},
+		s.handleResourceRead,
+	)
+}
+
+// removeSceneResource drops a scene's resource.
+func (s *Server) removeSceneResource(sceneName string) {
+	if s.mcpServer == nil {
+		return
+	}
+
+	uri := obs.GetResourceURIForScene(sceneName)
+
+	s.sceneResourceMu.Lock()
+	known := s.sceneResourcesLocked()[uri]
+	delete(s.sceneResourcesLocked(), uri)
+	s.sceneResourceMu.Unlock()
+
+	if !known {
+		return
+	}
+	s.mcpServer.RemoveResources(uri)
+}
