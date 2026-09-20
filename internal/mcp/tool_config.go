@@ -51,7 +51,7 @@ var toolGroupMetadata = map[string]*ToolGroupMetadata{
 	"Audio": {
 		Name:        "Audio",
 		Description: "Audio input control: mute state and volume levels",
-		ToolNames:   []string{"get_input_mute", "toggle_input_mute", "set_input_volume", "get_input_volume"},
+		ToolNames:   []string{"get_input_mute", "toggle_input_mute", "set_input_volume", "get_input_volume", "list_audio_devices", "create_audio_input"},
 	},
 	"Layout": {
 		Name:        "Layout",
