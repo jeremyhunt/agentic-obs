@@ -574,3 +574,35 @@ func (f *Fake) ToggleInputMute(inputName string) error {
 	in.muted = !in.muted
 	return nil
 }
+
+// canvas is the fake's video configuration.
+//
+// Not 1920x1080, and downscaled, on purpose: a fixture that matches the common
+// assumption lets code pass while reading hardcoded numbers instead of reported
+// ones. The fractional frame rate catches anything that reads the numerator and
+// calls it a rate. (FB-69)
+var canvas = obs.VideoSettings{
+	BaseWidth:      2560,
+	BaseHeight:     1440,
+	OutputWidth:    1920,
+	OutputHeight:   1080,
+	FPSNumerator:   60000,
+	FPSDenominator: 1001,
+}
+
+func (f *Fake) GetVideoSettings() (*obs.VideoSettings, error) {
+	v := canvas
+	return &v, nil
+}
+
+// GetOBSStatus reports enough of a status to carry the canvas, which is the
+// only part of it the contract covers.
+func (f *Fake) GetOBSStatus() (*obs.OBSStatus, error) {
+	v := canvas
+	return &obs.OBSStatus{
+		Version:          "32.2.2",
+		WebSocketVersion: "5.7.4",
+		Platform:         "windows",
+		Video:            &v,
+	}, nil
+}

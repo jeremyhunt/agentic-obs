@@ -664,9 +664,6 @@ func TestEngineConcurrentDispatch(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Drain: wait for all in-flight executeRule goroutines to complete.
-	time.Sleep(200 * time.Millisecond)
-
 	// Correctness guarantees we check even without -race:
 	//   (a) at least one rule fires per rule — the dispatcher isn't starved
 	//   (b) no panic / unrecovered map-write occurred (test would've crashed)
@@ -675,9 +672,15 @@ func TestEngineConcurrentDispatch(t *testing.T) {
 	// We intentionally do NOT assert an exact upper bound on actions here;
 	// that guarantee belongs to the cooldown contract tested by
 	// TestEngineCooldown. This test's job is concurrency survival.
-	actions := mock.GetActions()
-	assert.GreaterOrEqual(t, len(actions), 5,
-		"every rule should fire at least once under a 200-event burst")
+	//
+	// This used to sleep 200ms and then assert, which is a guess at how long an
+	// async dispatch takes -- fine on an idle machine, and a failure when the
+	// rest of the suite is running beside it. Wait for the observable instead,
+	// the way requireActionCount already does. (FB-69)
+	require.Eventually(t, func() bool {
+		return len(mock.GetActions()) >= 5
+	}, 5*time.Second, 10*time.Millisecond,
+		"every rule should fire at least once under a 200-event burst; got %v", mock.GetActions())
 
 	// Stop must not hang under load.
 	done := make(chan struct{})

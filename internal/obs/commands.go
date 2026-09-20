@@ -675,7 +675,41 @@ func (c *Client) GetOBSStatus() (*OBSStatus, error) {
 		DroppedFrames:    int(statsResp.OutputSkippedFrames),
 	}
 
+	// Non-fatal, like the scene name above: a status report without the canvas
+	// is still worth returning.
+	if video, err := c.GetVideoSettings(); err == nil {
+		status.Video = video
+	}
+
 	return status, nil
+}
+
+// GetVideoSettings reports the canvas resolution, output resolution and frame
+// rate.
+//
+// This is the question every layout decision starts from and nothing could ask.
+// The scene-designer skill assumed 1920x1080 throughout, which is wrong on any
+// canvas that is not -- and placements computed against the wrong canvas land
+// off-screen rather than merely off-centre. (FB-69)
+func (c *Client) GetVideoSettings() (*VideoSettings, error) {
+	client, err := c.getClient()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Config.GetVideoSettings()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get video settings: %w", err)
+	}
+
+	return &VideoSettings{
+		BaseWidth:      resp.BaseWidth,
+		BaseHeight:     resp.BaseHeight,
+		OutputWidth:    resp.OutputWidth,
+		OutputHeight:   resp.OutputHeight,
+		FPSNumerator:   resp.FpsNumerator,
+		FPSDenominator: resp.FpsDenominator,
+	}, nil
 }
 
 // OBSStatus represents overall OBS status information.
@@ -690,6 +724,56 @@ type OBSStatus struct {
 	FrameTime        float64 `json:"frame_time_ms"`
 	Frames           int     `json:"frames"`
 	DroppedFrames    int     `json:"dropped_frames"`
+
+	// Video is the canvas OBS is compositing onto. Nil when it could not be
+	// read, which is not fatal: everything else in the status is still useful,
+	// and failing the whole call over it would be worse than omitting it.
+	Video *VideoSettings `json:"video,omitempty"`
+}
+
+// VideoSettings describes OBS's canvas and frame rate.
+//
+// It is the answer to "how big is the thing I am laying out on", which nothing
+// could ask before: the scene-designer skill hardcoded 1920x1080 and was simply
+// wrong on this machine, where the canvas is 2560x1440. Every placement decision
+// depends on it. (FB-69)
+type VideoSettings struct {
+	// BaseWidth/BaseHeight are the canvas: the coordinate space scene item
+	// transforms live in, and what assets should be authored against.
+	BaseWidth  float64 `json:"base_width"`
+	BaseHeight float64 `json:"base_height"`
+
+	// OutputWidth/OutputHeight are what OBS actually encodes, after any
+	// downscale. Not the coordinate space -- a source at x=2000 is on-canvas at
+	// 2560 wide even when the output is 1920.
+	OutputWidth  float64 `json:"output_width"`
+	OutputHeight float64 `json:"output_height"`
+
+	// OBS stores frame rate as a fraction, because 59.94 is 60000/1001.
+	FPSNumerator   float64 `json:"fps_numerator"`
+	FPSDenominator float64 `json:"fps_denominator"`
+}
+
+// FPS is the frame rate as a single number.
+//
+// Guarded rather than divided directly: obs-websocket marshals with omitempty,
+// so a field it does not report arrives as zero rather than absent.
+func (v VideoSettings) FPS() float64 {
+	if v.FPSDenominator == 0 {
+		return 0
+	}
+	return v.FPSNumerator / v.FPSDenominator
+}
+
+// IsScaled reports whether the output resolution differs from the canvas.
+//
+// Worth surfacing because it is the common source of confusion when a layout
+// looks right in OBS and wrong in the stream.
+func (v VideoSettings) IsScaled() bool {
+	if v.BaseWidth == 0 || v.BaseHeight == 0 {
+		return false
+	}
+	return v.BaseWidth != v.OutputWidth || v.BaseHeight != v.OutputHeight
 }
 
 // SourceState represents the visibility state of a source for preset capture/apply.

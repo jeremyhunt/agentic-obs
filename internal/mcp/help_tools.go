@@ -215,6 +215,11 @@ var toolHelpContent = map[string]string{
 - current_scene: Active scene name
 - recording_active: Recording state
 - streaming_active: Streaming state
+- video: Canvas and frame rate -- base_width/base_height (the coordinate
+  space scene item transforms live in), output_width/output_height (what is
+  actually encoded), and fps_numerator/fps_denominator. Read the canvas
+  before computing any placement: it is frequently not 1920x1080, and a
+  layout built on that assumption lands off-screen rather than off-centre.
 
 **Example Output**:
 {

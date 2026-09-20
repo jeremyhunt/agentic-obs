@@ -181,6 +181,15 @@ type StatusReader interface {
 	GetOBSStatus() (*OBSStatus, error)
 }
 
+// CanvasReader reports the coordinate space scene items live in.
+//
+// Separate from StatusReader because a layout planner needs the canvas and
+// nothing else: it has no business being able to read whether a recording is
+// running. (FB-69)
+type CanvasReader interface {
+	GetVideoSettings() (*VideoSettings, error)
+}
+
 // ScenePresetOperator captures and re-applies source visibility for a scene.
 //
 // Scheduled to leave the client: a preset is a scene spec with everything but
@@ -234,6 +243,7 @@ var (
 	_ HotkeyTrigger                   = (*Client)(nil)
 	_ Screenshotter                   = (*Client)(nil)
 	_ StatusReader                    = (*Client)(nil)
+	_ CanvasReader                    = (*Client)(nil)
 	_ ScenePresetOperator             = (*Client)(nil)
 	_ AdvancedSceneSwitcherController = (*Client)(nil)
 	_ EventSource                     = (*Client)(nil)

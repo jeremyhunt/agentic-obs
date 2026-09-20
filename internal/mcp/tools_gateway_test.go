@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ironystock/agentic-obs/internal/obs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -141,4 +142,31 @@ func TestHandleListInputPropertyItems(t *testing.T) {
 		require.True(t, ok)
 		assert.Contains(t, items, "items")
 	})
+}
+
+// TestGetOBSStatusReportsTheCanvas pins the field every layout decision starts
+// from.
+//
+// The scene-designer skill hardcoded 1920x1080 because nothing could report the
+// real canvas. On the machine this was developed against it is 2560x1440, so
+// every placement computed from that assumption was off by 640x360 -- enough to
+// put a corner-anchored overlay off-screen rather than merely off-centre.
+// (FB-69)
+func TestGetOBSStatusReportsTheCanvas(t *testing.T) {
+	server, _ := testServer(t)
+
+	_, result, err := server.handleGetOBSStatus(context.Background(), nil, struct{}{})
+	require.NoError(t, err)
+
+	status, ok := result.(*obs.OBSStatus)
+	require.True(t, ok)
+	require.NotNil(t, status.Video, "status must carry the canvas; a layout tool has nothing to work from otherwise")
+
+	assert.Equal(t, 2560.0, status.Video.BaseWidth)
+	assert.Equal(t, 1440.0, status.Video.BaseHeight)
+
+	// The fixture is downscaled on purpose: base and output being different is
+	// the case that catches code treating them as interchangeable.
+	assert.True(t, status.Video.IsScaled())
+	assert.InDelta(t, 59.94, status.Video.FPS(), 0.01, "fractional frame rates must survive as a rate, not a numerator")
 }

@@ -46,6 +46,12 @@ type AudioClient interface {
 	ToggleInputMute(inputName string) error
 }
 
+// CanvasClient covers the canvas and the status that quotes it.
+type CanvasClient interface {
+	GetVideoSettings() (*obs.VideoSettings, error)
+	GetOBSStatus() (*obs.OBSStatus, error)
+}
+
 // FilterClient covers filters attached to a source.
 type FilterClient interface {
 	CreateSourceFilter(sourceName, filterName, filterKind string, settings map[string]interface{}) error
@@ -62,6 +68,7 @@ type ContractClient interface {
 	InputClient
 	InputSettingsClient
 	AudioClient
+	CanvasClient
 	FilterClient
 }
 
@@ -331,6 +338,54 @@ func RunContract(t *testing.T, newClient NewClient) {
 		// cannot be "try create, ignore the error" unless the error is reliable.
 		if _, err := client.CreateInput(fx.SceneName, fx.SourceName, fx.SourceKind, nil); err == nil {
 			t.Errorf("expected an error creating a second input named %q", fx.SourceName)
+		}
+	})
+	t.Run("the canvas is reported with usable dimensions", func(t *testing.T) {
+		client, _ := newClient(t)
+
+		// Every placement decision is arithmetic in this coordinate space, so
+		// zero here is not a missing field, it is a division waiting to happen.
+		v, err := client.GetVideoSettings()
+		if err != nil {
+			t.Fatalf("GetVideoSettings: %v", err)
+		}
+		if v.BaseWidth <= 0 || v.BaseHeight <= 0 {
+			t.Errorf("canvas is %vx%v; scene item coordinates are meaningless against it",
+				v.BaseWidth, v.BaseHeight)
+		}
+		if v.FPS() <= 0 {
+			t.Errorf("frame rate is %v (from %v/%v)", v.FPS(), v.FPSNumerator, v.FPSDenominator)
+		}
+	})
+	t.Run("the status quotes the same canvas", func(t *testing.T) {
+		client, _ := newClient(t)
+
+		// The status attaches the canvas separately, so the two can disagree --
+		// and an agent reading it from the status would then lay out against a
+		// canvas nothing else believes in.
+		//
+		// This row exists because mutating the status path was not caught by any
+		// test: the tests that cover it run against a double, which supplies its
+		// own canvas and so cannot see the real attachment being dropped.
+		// (FB-69)
+		direct, err := client.GetVideoSettings()
+		if err != nil {
+			t.Fatalf("GetVideoSettings: %v", err)
+		}
+		status, err := client.GetOBSStatus()
+		if err != nil {
+			t.Fatalf("GetOBSStatus: %v", err)
+		}
+		if status.Video == nil {
+			t.Fatal("status carries no canvas")
+		}
+
+		if status.Video.BaseWidth != direct.BaseWidth || status.Video.BaseHeight != direct.BaseHeight {
+			t.Errorf("status reports canvas %vx%v, GetVideoSettings reports %vx%v",
+				status.Video.BaseWidth, status.Video.BaseHeight, direct.BaseWidth, direct.BaseHeight)
+		}
+		if status.Video.FPS() != direct.FPS() {
+			t.Errorf("status reports %v fps, GetVideoSettings reports %v", status.Video.FPS(), direct.FPS())
 		}
 	})
 	t.Run("setting mute is idempotent, not a toggle", func(t *testing.T) {
