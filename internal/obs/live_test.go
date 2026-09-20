@@ -20,6 +20,8 @@ package obs_test
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,6 +164,135 @@ func borrowGroup(t *testing.T, client *obs.Client, scratchScene string) (string,
 		}
 	}
 	return "", 0
+}
+
+// TestLiveRequestCoverageIsMeasured compares what this build can issue against
+// what the server says it offers.
+//
+// "Drive every OBS control surface" is only a real claim if the gap is a number
+// someone checks, not a sentence in a design document. OBS reports its own
+// request list in GetVersion.availableRequests, so the comparison needs no
+// hand-maintained table and cannot drift: a request added by a future OBS shows
+// up here as uncovered the first time this runs.
+//
+// The four private-settings requests are expected to be missing. obs-websocket
+// offers them and goobs does not generate them, so they need a goobs
+// contribution or the Lua bridge. They are listed rather than tolerated
+// silently -- if the list ever changes, this test says so.
+func TestLiveRequestCoverageIsMeasured(t *testing.T) {
+	client := liveClient(t)
+
+	// Read the server's own request list through the passthrough. Using the
+	// mechanism under test to measure itself is deliberate: if CallRequest is
+	// broken, this test cannot report a false clean bill of health.
+	version, err := client.CallRequest("GetVersion", nil)
+	if err != nil {
+		t.Fatalf("CallRequest(GetVersion): %v", err)
+	}
+	offered := []string{}
+	for _, name := range version["availableRequests"].([]interface{}) {
+		offered = append(offered, name.(string))
+	}
+
+	reachable := map[string]bool{}
+	for _, name := range client.AvailableRequests() {
+		reachable[name] = true
+	}
+
+	knownUnreachable := map[string]string{
+		"GetSourcePrivateSettings":    "goobs does not generate it",
+		"SetSourcePrivateSettings":    "goobs does not generate it",
+		"GetSceneItemPrivateSettings": "goobs does not generate it",
+		"SetSceneItemPrivateSettings": "goobs does not generate it",
+	}
+
+	var unexpected []string
+	for _, offered := range offered {
+		if reachable[offered] {
+			continue
+		}
+		if _, known := knownUnreachable[offered]; known {
+			continue
+		}
+		unexpected = append(unexpected, offered)
+	}
+	sort.Strings(unexpected)
+
+	t.Logf("obs-websocket %v offers %d requests; %d reachable through call_obs_request",
+		version["obsWebSocketVersion"], len(offered), len(reachable))
+
+	if len(unexpected) > 0 {
+		t.Errorf("%d requests this build cannot issue and has not accounted for: %v\n"+
+			"Either the registry stopped recognising goobs' generated shape, or OBS "+
+			"gained requests goobs has not caught up with.",
+			len(unexpected), unexpected)
+	}
+
+	// The converse: a name in knownUnreachable that has become reachable means
+	// goobs caught up and the exception should go, along with whatever work was
+	// deferred behind it.
+	for name := range knownUnreachable {
+		if reachable[name] {
+			t.Errorf("%s is now reachable; remove it from knownUnreachable and from "+
+				"whatever was waiting on the Lua bridge for it", name)
+		}
+	}
+}
+
+// TestLiveCallRequestReachesAnUnwrappedSurface proves the passthrough is not
+// merely a registry.
+//
+// GetStats has no typed wrapper in this package and is the telemetry the design
+// plan wants for a "variables" surface. If it answers here, so does every other
+// unwrapped request, because they all travel the same path.
+func TestLiveCallRequestReachesAnUnwrappedSurface(t *testing.T) {
+	client := liveClient(t)
+
+	got, err := client.CallRequest("GetStats", nil)
+	if err != nil {
+		t.Fatalf("CallRequest(GetStats): %v", err)
+	}
+	for _, field := range []string{"cpuUsage", "memoryUsage", "availableDiskSpace", "activeFps"} {
+		if _, ok := got[field]; !ok {
+			t.Errorf("GetStats response has no %q; got keys %v", field, keysOf(got))
+		}
+	}
+
+	// A request that takes required parameters, reached generically.
+	scenes, _, err := client.GetSceneList()
+	if err != nil || len(scenes) == 0 {
+		t.Fatalf("GetSceneList: %v", err)
+	}
+	items, err := client.CallRequest("GetSceneItemList", map[string]interface{}{
+		"sceneName": scenes[0],
+	})
+	if err != nil {
+		t.Fatalf("CallRequest(GetSceneItemList): %v", err)
+	}
+	if _, ok := items["sceneItems"]; !ok {
+		t.Errorf("GetSceneItemList response has no sceneItems; got %v", keysOf(items))
+	}
+
+	// A server-side refusal must arrive as an error carrying OBS's own words,
+	// because the agent's next move depends on which refusal it was.
+	_, err = client.CallRequest("GetSceneItemList", map[string]interface{}{
+		"sceneName": "agentic-obs-no-such-scene",
+	})
+	if err == nil {
+		t.Fatal("expected an error for a scene that does not exist")
+	}
+	if !strings.Contains(err.Error(), "ResourceNotFound") {
+		t.Errorf("error lost the server's status: %v", err)
+	}
+}
+
+func keysOf(m map[string]interface{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // recordingSink collects translated events for the live event test.

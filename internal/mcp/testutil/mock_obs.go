@@ -70,6 +70,8 @@ type MockOBSClient struct {
 	inputDefaults       map[string]map[string]interface{}          // input kind -> default settings
 	buttonPresses       []string                                   // recorded "source:property" presses
 	vendorCalls         []VendorCall                               // recorded vendor requests
+	rawCalls            []RawCall                                  // recorded call_obs_request calls
+	rawResponses        map[string]map[string]interface{}          // seeded raw request responses
 	vendorResponses     map[string]map[string]any                  // "vendor/request" -> response
 	nextSceneItemID     int                                        // counter for new scene items
 
@@ -78,6 +80,7 @@ type MockOBSClient struct {
 	ErrorOnGetVideoSettings           error
 	ErrorOnCreateSceneItem            error
 	ErrorOnCallVendorRequest          error
+	ErrorOnCallRequest                error
 	ErrorOnSetSourceSettings          error
 	ErrorOnGetInputDefaultSettings    error
 	ErrorOnPressInputPropertiesButton error

@@ -41,6 +41,7 @@ var toolGroupMetadata = map[string]*ToolGroupMetadata{
 			"get_replay_buffer_status", "toggle_replay_buffer", "save_replay_buffer", "get_last_replay",
 			"get_studio_mode_enabled", "toggle_studio_mode", "get_preview_scene", "set_preview_scene",
 			"list_hotkeys", "trigger_hotkey_by_name", "call_vendor_request",
+			"call_obs_request", "list_obs_requests",
 		},
 	},
 	"Sources": {

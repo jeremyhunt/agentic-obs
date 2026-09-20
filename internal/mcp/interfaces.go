@@ -35,6 +35,7 @@ type OBSClient interface {
 	obs.ScenePresetOperator
 	obs.AdvancedSceneSwitcherController
 	obs.VendorCaller
+	obs.RawRequester
 	obs.EventSource
 }
 
