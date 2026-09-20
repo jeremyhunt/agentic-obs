@@ -429,6 +429,9 @@ is what you write back with set_source_settings.`,
 
 **Input**:
 - input_name (string, required): Name of audio input
+- muted (bool, optional): Explicit mute state. Omit to toggle. Prefer supplying
+  it: a toggle cannot be retried safely, and a mute that lands the wrong way
+  round is a silent stream.
 
 **Output**:
 - message: Success confirmation
@@ -1447,7 +1450,9 @@ is what you write back with set_source_settings.`,
 
 **Description**: Start or stop the OBS virtual camera.
 
-**Input**: None
+**Input**:
+- active (bool, optional): Explicit state. Omit to toggle. Supplying it is
+  safe to retry: asking for a state the output is already in does nothing.
 
 **Output**:
 - active: Boolean indicating new virtual camera state
@@ -1481,7 +1486,9 @@ is what you write back with set_source_settings.`,
 
 **Description**: Start or stop the replay buffer.
 
-**Input**: None
+**Input**:
+- active (bool, optional): Explicit state. Omit to toggle. Supplying it is
+  safe to retry: asking for a state the output is already in does nothing.
 
 **Output**:
 - active: Boolean indicating new replay buffer state

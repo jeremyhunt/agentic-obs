@@ -50,6 +50,7 @@ type input struct {
 	name     string
 	kind     string
 	settings map[string]interface{}
+	muted    bool
 	filters  []*filter
 }
 
@@ -456,6 +457,7 @@ func (f *Fake) DuplicateSceneItem(sceneName string, sceneItemID int, destScene s
 // distinguishes them.
 var kindDefaults = map[string]map[string]interface{}{
 	"color_source_v3": {"color": 4278190080.0, "width": 0.0, "height": 0.0},
+	"ffmpeg_source":   {"local_file": "", "looping": false, "restart_on_activate": true},
 }
 
 func (f *Fake) GetSourceSettings(sourceName string) (map[string]interface{}, error) {
@@ -503,4 +505,72 @@ func (f *Fake) GetInputDefaultSettings(inputKind string) (map[string]interface{}
 	}
 	// A copy, so a caller cannot edit the defaults every other caller reads.
 	return copySettings(defaults), nil
+}
+
+// audioCapableKinds are the input kinds that have an audio track.
+//
+// obs-websocket answers InvalidResourceState (604) "The specified input does not
+// support audio" for anything else, and the fake has to as well: accepting a
+// mute on a colour source is precisely the kind of over-permissiveness that lets
+// a test certify behaviour a real OBS rejects. Found by running the contract
+// live after the first draft assumed any input could be muted. (FB-68)
+var audioCapableKinds = map[string]bool{
+	"ffmpeg_source":                 true,
+	"vlc_source":                    true,
+	"wasapi_input_capture":          true,
+	"wasapi_output_capture":         true,
+	"wasapi_process_output_capture": true,
+	"coreaudio_input_capture":       true,
+	"coreaudio_output_capture":      true,
+	"pulse_input_capture":           true,
+	"pulse_output_capture":          true,
+	"browser_source":                true,
+	"game_capture":                  true,
+}
+
+// audioInput looks up an input and checks it has audio at all.
+func (f *Fake) audioInput(inputName string) (*input, error) {
+	in, ok := f.world.inputs[inputName]
+	if !ok {
+		return nil, fmt.Errorf("input %q not found", inputName)
+	}
+	if !audioCapableKinds[in.kind] {
+		return nil, fmt.Errorf("the specified input does not support audio: %q is a %s", inputName, in.kind)
+	}
+	return in, nil
+}
+
+func (f *Fake) GetInputMute(inputName string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	in, err := f.audioInput(inputName)
+	if err != nil {
+		return false, err
+	}
+	return in.muted, nil
+}
+
+func (f *Fake) SetInputMute(inputName string, muted bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	in, err := f.audioInput(inputName)
+	if err != nil {
+		return err
+	}
+	in.muted = muted
+	return nil
+}
+
+func (f *Fake) ToggleInputMute(inputName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	in, err := f.audioInput(inputName)
+	if err != nil {
+		return err
+	}
+	in.muted = !in.muted
+	return nil
 }

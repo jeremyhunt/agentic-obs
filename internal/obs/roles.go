@@ -83,6 +83,7 @@ type InputConfigurer interface {
 // AudioController covers mute and volume on an input.
 type AudioController interface {
 	GetInputMute(inputName string) (bool, error)
+	SetInputMute(inputName string, muted bool) error
 	ToggleInputMute(inputName string) error
 	SetInputVolume(inputName string, volumeDb *float64, volumeMul *float64) error
 	GetInputVolume(inputName string) (float64, float64, error)

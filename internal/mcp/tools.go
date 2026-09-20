@@ -43,6 +43,23 @@ type InputNameInput struct {
 	InputName string `json:"input_name"`
 }
 
+// ToggleInputMuteInput is the input for muting an audio input.
+//
+// Muted follows the toggle_source_filter pattern: supply it to set an explicit
+// state, omit it to flip whatever the current state is. Prefer supplying it --
+// a toggle cannot be retried safely, and a mute that lands the wrong way round
+// is a silent stream nobody notices until the VOD. (FB-68)
+type ToggleInputMuteInput struct {
+	InputName string `json:"input_name" jsonschema:"Name of the audio input"`
+	Muted     *bool  `json:"muted,omitempty" jsonschema:"Explicit mute state; omit to toggle"`
+}
+
+// ToggleOutputInput is the input for the outputs that have no other parameters
+// -- the virtual camera and the replay buffer.
+type ToggleOutputInput struct {
+	Active *bool `json:"active,omitempty" jsonschema:"Explicit active state; omit to toggle"`
+}
+
 // CreateAudioInputInput is the input for creating a WASAPI audio capture source
 type CreateAudioInputInput struct {
 	SceneName  string `json:"scene_name" jsonschema:"Name of the scene to add the audio source to"`
@@ -1411,16 +1428,37 @@ func (s *Server) handleGetInputMute(ctx context.Context, request *mcpsdk.CallToo
 	return nil, result, nil
 }
 
-func (s *Server) handleToggleInputMute(ctx context.Context, request *mcpsdk.CallToolRequest, input InputNameInput) (*mcpsdk.CallToolResult, any, error) {
+func (s *Server) handleToggleInputMute(ctx context.Context, request *mcpsdk.CallToolRequest, input ToggleInputMuteInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Toggling mute for input: %s", input.InputName)
 
-	if err := s.obsClient.ToggleInputMute(input.InputName); err != nil {
-		s.recordAction("toggle_input_mute", "Toggle input mute", input, nil, false, time.Since(start))
-		return nil, nil, fmt.Errorf("failed to toggle input mute: %w", err)
+	if input.Muted != nil {
+		log.Printf("Setting mute=%v for input: %s", *input.Muted, input.InputName)
+		if err := s.obsClient.SetInputMute(input.InputName, *input.Muted); err != nil {
+			s.recordAction("toggle_input_mute", "Set input mute", input, nil, false, time.Since(start))
+			return nil, nil, fmt.Errorf("failed to set input mute: %w", err)
+		}
+	} else {
+		log.Printf("Toggling mute for input: %s", input.InputName)
+		if err := s.obsClient.ToggleInputMute(input.InputName); err != nil {
+			s.recordAction("toggle_input_mute", "Toggle input mute", input, nil, false, time.Since(start))
+			return nil, nil, fmt.Errorf("failed to toggle input mute: %w", err)
+		}
 	}
 
-	result := SimpleResult{Message: fmt.Sprintf("Successfully toggled mute for input: %s", input.InputName)}
+	// Read the state back rather than assuming it: a caller that toggled has no
+	// way to know the result otherwise, and one that set a state deserves
+	// confirmation rather than an echo of its own request.
+	muted, err := s.obsClient.GetInputMute(input.InputName)
+	if err != nil {
+		s.recordAction("toggle_input_mute", "Toggle input mute", input, nil, false, time.Since(start))
+		return nil, nil, fmt.Errorf("mute changed but could not be read back: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"input_name": input.InputName,
+		"muted":      muted,
+		"message":    fmt.Sprintf("Input '%s' is now %s", input.InputName, map[bool]string{true: "muted", false: "unmuted"}[muted]),
+	}
 	s.recordAction("toggle_input_mute", "Toggle input mute", input, result, true, time.Since(start))
 	return nil, result, nil
 }
@@ -2677,21 +2715,77 @@ func (s *Server) handleGetVirtualCamStatus(ctx context.Context, request *mcpsdk.
 }
 
 // handleToggleVirtualCam toggles the virtual camera on/off
-func (s *Server) handleToggleVirtualCam(ctx context.Context, request *mcpsdk.CallToolRequest, input struct{}) (*mcpsdk.CallToolResult, any, error) {
-	start := time.Now()
-	log.Println("Toggling virtual camera")
 
-	active, err := s.obsClient.ToggleVirtualCam()
+// setOrToggleOutput drives an OBS output to an explicit state, or flips it when
+// no state is given, and reports where it ended up.
+//
+// Shared by the virtual camera and the replay buffer because the shape is
+// identical, and because the two details worth getting right are easy to miss.
+//
+// It reads the current state before acting. Starting an output that is already
+// running is an error, not a no-op -- obs-websocket answers OutputRunning -- so
+// without this check, asking twice for active=true would fail the second time
+// and the explicit state would be no more retry-safe than the toggle it
+// replaces. That is the entire reason it exists.
+//
+// And it reads the state back afterwards rather than assuming it. A caller that
+// toggled has no other way to learn the outcome, and one that set a state
+// deserves confirmation rather than an echo of its own request. (FB-68)
+func (s *Server) setOrToggleOutput(
+	want *bool,
+	start func() error,
+	stop func() error,
+	toggle func() (bool, error),
+	read func() (bool, error),
+) (bool, error) {
+	if want == nil {
+		return toggle()
+	}
+
+	current, err := read()
 	if err != nil {
-		s.recordAction("toggle_virtual_cam", "Toggle virtual camera", nil, nil, false, time.Since(start))
-		return nil, nil, fmt.Errorf("failed to toggle virtual camera: %w", err)
+		return false, err
+	}
+	if current == *want {
+		return current, nil
+	}
+
+	if *want {
+		err = start()
+	} else {
+		err = stop()
+	}
+	if err != nil {
+		return false, err
+	}
+	return read()
+}
+
+func (s *Server) handleToggleVirtualCam(ctx context.Context, request *mcpsdk.CallToolRequest, input ToggleOutputInput) (*mcpsdk.CallToolResult, any, error) {
+	start := time.Now()
+
+	// An explicit state composes the start/stop requests that already exist.
+	// Starting something already running is a no-op in OBS, so asking twice for
+	// the same state is safe -- which is the entire point of offering it.
+	active, err := s.setOrToggleOutput(input.Active,
+		s.obsClient.StartVirtualCam, s.obsClient.StopVirtualCam, s.obsClient.ToggleVirtualCam,
+		func() (bool, error) {
+			status, err := s.obsClient.GetVirtualCamStatus()
+			if err != nil {
+				return false, err
+			}
+			return status.Active, nil
+		})
+	if err != nil {
+		s.recordAction("toggle_virtual_cam", "Toggle virtual camera", input, nil, false, time.Since(start))
+		return nil, nil, fmt.Errorf("failed to set virtual camera state: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"active":  active,
 		"message": fmt.Sprintf("Virtual camera is now %s", map[bool]string{true: "active", false: "inactive"}[active]),
 	}
-	s.recordAction("toggle_virtual_cam", "Toggle virtual camera", nil, result, true, time.Since(start))
+	s.recordAction("toggle_virtual_cam", "Toggle virtual camera", input, result, true, time.Since(start))
 	return nil, result, nil
 }
 
@@ -2715,21 +2809,28 @@ func (s *Server) handleGetReplayBufferStatus(ctx context.Context, request *mcpsd
 }
 
 // handleToggleReplayBuffer toggles the replay buffer on/off
-func (s *Server) handleToggleReplayBuffer(ctx context.Context, request *mcpsdk.CallToolRequest, input struct{}) (*mcpsdk.CallToolResult, any, error) {
+func (s *Server) handleToggleReplayBuffer(ctx context.Context, request *mcpsdk.CallToolRequest, input ToggleOutputInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Println("Toggling replay buffer")
 
-	active, err := s.obsClient.ToggleReplayBuffer()
+	active, err := s.setOrToggleOutput(input.Active,
+		s.obsClient.StartReplayBuffer, s.obsClient.StopReplayBuffer, s.obsClient.ToggleReplayBuffer,
+		func() (bool, error) {
+			status, err := s.obsClient.GetReplayBufferStatus()
+			if err != nil {
+				return false, err
+			}
+			return status.Active, nil
+		})
 	if err != nil {
-		s.recordAction("toggle_replay_buffer", "Toggle replay buffer", nil, nil, false, time.Since(start))
-		return nil, nil, fmt.Errorf("failed to toggle replay buffer: %w", err)
+		s.recordAction("toggle_replay_buffer", "Toggle replay buffer", input, nil, false, time.Since(start))
+		return nil, nil, fmt.Errorf("failed to set replay buffer state: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"active":  active,
 		"message": fmt.Sprintf("Replay buffer is now %s", map[bool]string{true: "active", false: "inactive"}[active]),
 	}
-	s.recordAction("toggle_replay_buffer", "Toggle replay buffer", nil, result, true, time.Since(start))
+	s.recordAction("toggle_replay_buffer", "Toggle replay buffer", input, result, true, time.Since(start))
 	return nil, result, nil
 }
 

@@ -550,6 +550,31 @@ func (c *Client) ToggleInputMute(inputName string) error {
 	return nil
 }
 
+// SetInputMute sets an input's mute state explicitly.
+//
+// Prefer this to ToggleInputMute wherever the caller knows the state it wants.
+// The same argument as SetSceneItemEnabled: a toggle cannot be retried, so a
+// timeout, a duplicate event or two rules firing on one input leave it in the
+// opposite state to the one intended -- and for audio that means a silent
+// stream nobody notices until the VOD. (FB-68)
+func (c *Client) SetInputMute(inputName string, muted bool) error {
+	client, err := c.getClient()
+	if err != nil {
+		return err
+	}
+
+	name := inputName
+	_, err = client.Inputs.SetInputMute(&inputs.SetInputMuteParams{
+		InputName:  &name,
+		InputMuted: &muted,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set mute=%v for input '%s': %w. Input may not exist", muted, inputName, err)
+	}
+
+	return nil
+}
+
 // SetInputVolume sets the volume level of an audio input.
 // volumeDb is in decibels (-100.0 to 26.0), or use volumeMul (0.0 to 20.0) for multiplier.
 func (c *Client) SetInputVolume(inputName string, volumeDb *float64, volumeMul *float64) error {

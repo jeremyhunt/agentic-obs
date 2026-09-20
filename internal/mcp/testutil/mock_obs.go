@@ -71,6 +71,7 @@ type MockOBSClient struct {
 	nextSceneItemID     int                                        // counter for new scene items
 
 	// Error injection for design tools
+	ErrorOnSetInputMute               error
 	ErrorOnSetSourceSettings          error
 	ErrorOnGetInputDefaultSettings    error
 	ErrorOnPressInputPropertiesButton error
@@ -948,6 +949,27 @@ func (m *MockOBSClient) ToggleInputMute(inputName string) error {
 	}
 
 	m.inputMutes[inputName] = !m.inputMutes[inputName]
+	return nil
+}
+
+// SetInputMute sets an input's mute state explicitly. (FB-68)
+func (m *MockOBSClient) SetInputMute(inputName string, muted bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.ErrorOnSetInputMute != nil {
+		return m.ErrorOnSetInputMute
+	}
+
+	if !m.connected {
+		return fmt.Errorf("not connected to OBS")
+	}
+
+	if _, exists := m.inputMutes[inputName]; !exists {
+		return fmt.Errorf("input '%s' not found", inputName)
+	}
+
+	m.inputMutes[inputName] = muted
 	return nil
 }
 
