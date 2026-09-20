@@ -202,7 +202,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 
 	// Set up event callback to dispatch MCP notifications
 	eventHandler := obs.NewEventHandler(s.handleOBSEventNotification)
-	obsClient.SetEventCallback(eventHandler)
+	obsClient.SetEventSink(eventHandler)
 
 	s.obsClient = obsClient
 
