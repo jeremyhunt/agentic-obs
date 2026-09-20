@@ -27,6 +27,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   than omitted. Both are now contract rows and both are enforced by the fake.
   `apply_scene_spec` will construct transforms from scratch and would have hit
   this.
+- **Contract coverage for inputs, placements and filters (FB-60)** — nine rows
+  on top of FB-58's four, covering input creation and name collisions, scene-item
+  removal, and the filter lifecycle including the merge/replace distinction
+  between `overlay: true` and `overlay: false`. All nine pass against OBS 32.2.2
+  as well as the fake. The placement row is the one worth knowing about: OBS
+  refcounts sources, so removing an input's *only* scene item frees the input —
+  what holds is that removing one placement leaves an input another placement
+  still references, which is what `apply_scene_spec`'s `on_unmanaged: remove`
+  depends on. `GetSceneItemEnabled` was added as the reader `SetSceneItemEnabled`
+  never had, and the contract's client interface split into `SceneItemClient`,
+  `InputClient` and `FilterClient` so each row declares only the role it uses.
 - **`toggle_source_visibility` accepts an explicit state (FB-55)** — pass
   `visible: true`/`false` to set the state directly, or omit it to keep the
   previous toggle behaviour. A bare toggle is not safe to retry: if a call times
@@ -48,6 +59,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`automation-setup` prompt (FB-20 follow-up)** — 14th MCP workflow prompt; guides users through creating, testing, and monitoring automation rules. Accepts optional `rule_type` ('event'|'schedule') and `trigger_event` arguments for targeted guidance.
 
 ### Fixed
+- **`obs://scene/{name}` reported every source as hidden (FB-60)** —
+  `GetSceneByName` built each `SceneSource` without ever setting `Visible`, so
+  the resource published `"visible": false` for every source in every scene,
+  directly beneath an `"enabled"` field that told the truth. obs-websocket has
+  one notion of an item showing (`sceneItemEnabled`), so both fields now carry
+  it. The conversion moved out into `sceneSourceFromItem` so it can be tested
+  without a websocket connection — it previously had no CI coverage at all,
+  because both test doubles populated `Visible` and so agreed with a client
+  that never did.
 - **Subscriptions were accepted for resources that never emit (FB-59)** — the
   FB-57 guard's comment said it rejected "URIs we will never notify about", but it
   only checked the `obs://` prefix, so `obs://screenshot/...` and
