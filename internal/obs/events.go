@@ -376,6 +376,15 @@ func ShouldTriggerResourceUpdated(eventType EventType) bool {
 		// that scene changing. (FB-57)
 		EventTypeSourceVisibilityChanged:
 		return true
+
+		// Filter events are deliberately absent, though the client now
+		// subscribes to them (FB-62) and the plan called for mapping them here.
+		// obs://scene/{name} publishes id, name, type, enabled, visible, locked
+		// and the transform -- no filter state -- so a filter change cannot alter
+		// what a subscriber would read back. Notifying anyway costs a round trip
+		// and teaches the client the signal is unreliable. This becomes correct
+		// only if the resource is enriched to carry filters, which was reviewed
+		// and rejected on round-trip cost. (FB-63)
 	default:
 		return false
 	}
