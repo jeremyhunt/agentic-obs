@@ -58,7 +58,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - docs-maintainer agent for documentation consistency
 - **`automation-setup` prompt (FB-20 follow-up)** — 14th MCP workflow prompt; guides users through creating, testing, and monitoring automation rules. Accepts optional `rule_type` ('event'|'schedule') and `trigger_event` arguments for targeted guidance.
 
+### Changed
+- **`OBSClient` is composed from role interfaces (FB-61)** — the flat 76-method
+  interface is replaced by roles declared in `internal/obs/roles.go` next to the
+  client that implements them (`SceneReader`, `SceneItemWriter`,
+  `FilterManager`, `RecordingController`, …). `internal/automation` had
+  maintained its own near-copy to avoid depending on all 76, and the copy
+  drifted — its comment asserted obs-websocket had no visibility setter long
+  after one existed, which is how FB-55 happened. Both consumers now compose
+  what they use, so there is nothing to keep in step by hand.
+  `TestOBSClientIsExactlyTheUnionOfRoles` enforces it, and it catches what the
+  compiler cannot: a method declared inline that both the client and the mock
+  already implement builds perfectly. `CallVendorRequest` turned out to be on
+  the client already with nothing exposing it, so it gets a `VendorCaller` role
+  pending increment 2a.
+
 ### Fixed
+- **Filter and vendor events were never subscribed (FB-62)** — the connection
+  asked obs-websocket for six event categories and omitted `Filters` and
+  `Vendors`. An unsubscribed category raises no error and logs nothing; the
+  events simply never arrive, so a handler written for one looks correct
+  forever. `VendorEvent` is the only inbound channel from a plugin — Advanced
+  Scene Switcher, obs-browser, and the proposed Lua bridge all reply through
+  it — so that channel was one-way. The mask now lives on `ConnectionConfig`,
+  resolved once at construction so a reconnect cannot return with a different
+  subscription set, and the tests pin both the categories that must be present
+  and the high-volume ones that must stay opt-in (`InputVolumeMeters`,
+  `SceneItemTransformChanged`).
 - **`obs://scene/{name}` reported every source as hidden (FB-60)** —
   `GetSceneByName` built each `SceneSource` without ever setting `Visible`, so
   the resource published `"visible": false` for every source in every scene,
