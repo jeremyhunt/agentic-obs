@@ -171,7 +171,8 @@ type CreateMediaSourceInput struct {
 // SetSourceTransformInput is the input for setting source transform properties
 type SetSourceTransformInput struct {
 	SceneName   string   `json:"scene_name" jsonschema:"Name of the scene containing the source"`
-	SceneItemID int      `json:"scene_item_id" jsonschema:"Scene item ID of the source"`
+	SceneItemID int      `json:"scene_item_id,omitempty" jsonschema:"Scene item ID; omit if source_name is given"`
+	SourceName  string   `json:"source_name,omitempty" jsonschema:"Source name, resolved to a scene item ID; refused if the source is placed more than once in the scene"`
 	X           *float64 `json:"x,omitempty" jsonschema:"X position in pixels"`
 	Y           *float64 `json:"y,omitempty" jsonschema:"Y position in pixels"`
 	ScaleX      *float64 `json:"scale_x,omitempty" jsonschema:"X scale factor (1.0 = 100%)"`
@@ -182,13 +183,15 @@ type SetSourceTransformInput struct {
 // GetSourceTransformInput is the input for getting source transform properties
 type GetSourceTransformInput struct {
 	SceneName   string `json:"scene_name" jsonschema:"Name of the scene containing the source"`
-	SceneItemID int    `json:"scene_item_id" jsonschema:"Scene item ID of the source"`
+	SceneItemID int    `json:"scene_item_id,omitempty" jsonschema:"Scene item ID; omit if source_name is given"`
+	SourceName  string `json:"source_name,omitempty" jsonschema:"Source name, resolved to a scene item ID; refused if the source is placed more than once in the scene"`
 }
 
 // SetSourceCropInput is the input for setting source crop
 type SetSourceCropInput struct {
 	SceneName   string `json:"scene_name" jsonschema:"Name of the scene containing the source"`
-	SceneItemID int    `json:"scene_item_id" jsonschema:"Scene item ID of the source"`
+	SceneItemID int    `json:"scene_item_id,omitempty" jsonschema:"Scene item ID; omit if source_name is given"`
+	SourceName  string `json:"source_name,omitempty" jsonschema:"Source name, resolved to a scene item ID; refused if the source is placed more than once in the scene"`
 	CropTop     int    `json:"crop_top,omitempty" jsonschema:"Pixels to crop from top"`
 	CropBottom  int    `json:"crop_bottom,omitempty" jsonschema:"Pixels to crop from bottom"`
 	CropLeft    int    `json:"crop_left,omitempty" jsonschema:"Pixels to crop from left"`
@@ -198,7 +201,8 @@ type SetSourceCropInput struct {
 // SetSourceBoundsInput is the input for setting source bounds
 type SetSourceBoundsInput struct {
 	SceneName    string  `json:"scene_name" jsonschema:"Name of the scene containing the source"`
-	SceneItemID  int     `json:"scene_item_id" jsonschema:"Scene item ID of the source"`
+	SceneItemID  int     `json:"scene_item_id,omitempty" jsonschema:"Scene item ID; omit if source_name is given"`
+	SourceName   string  `json:"source_name,omitempty" jsonschema:"Source name, resolved to a scene item ID; refused if the source is placed more than once in the scene"`
 	BoundsType   string  `json:"bounds_type" jsonschema:"Bounds type: OBS_BOUNDS_NONE, OBS_BOUNDS_STRETCH, OBS_BOUNDS_SCALE_INNER, OBS_BOUNDS_SCALE_OUTER, OBS_BOUNDS_SCALE_TO_WIDTH, OBS_BOUNDS_SCALE_TO_HEIGHT, OBS_BOUNDS_MAX_ONLY"`
 	BoundsWidth  float64 `json:"bounds_width,omitempty" jsonschema:"Bounds width in pixels"`
 	BoundsHeight float64 `json:"bounds_height,omitempty" jsonschema:"Bounds height in pixels"`
@@ -207,28 +211,32 @@ type SetSourceBoundsInput struct {
 // SetSourceOrderInput is the input for setting source z-order
 type SetSourceOrderInput struct {
 	SceneName   string `json:"scene_name" jsonschema:"Name of the scene containing the source"`
-	SceneItemID int    `json:"scene_item_id" jsonschema:"Scene item ID of the source"`
+	SceneItemID int    `json:"scene_item_id,omitempty" jsonschema:"Scene item ID; omit if source_name is given"`
+	SourceName  string `json:"source_name,omitempty" jsonschema:"Source name, resolved to a scene item ID; refused if the source is placed more than once in the scene"`
 	Index       int    `json:"index" jsonschema:"New index position (0 = bottom, higher = front)"`
 }
 
 // SetSourceLockedInput is the input for locking/unlocking a source
 type SetSourceLockedInput struct {
 	SceneName   string `json:"scene_name" jsonschema:"Name of the scene containing the source"`
-	SceneItemID int    `json:"scene_item_id" jsonschema:"Scene item ID of the source"`
+	SceneItemID int    `json:"scene_item_id,omitempty" jsonschema:"Scene item ID; omit if source_name is given"`
+	SourceName  string `json:"source_name,omitempty" jsonschema:"Source name, resolved to a scene item ID; refused if the source is placed more than once in the scene"`
 	Locked      bool   `json:"locked" jsonschema:"Whether the source should be locked"`
 }
 
 // DuplicateSourceInput is the input for duplicating a source
 type DuplicateSourceInput struct {
 	SceneName     string `json:"scene_name" jsonschema:"Name of the scene containing the source"`
-	SceneItemID   int    `json:"scene_item_id" jsonschema:"Scene item ID of the source to duplicate"`
+	SceneItemID   int    `json:"scene_item_id,omitempty" jsonschema:"Scene item ID; omit if source_name is given"`
+	SourceName    string `json:"source_name,omitempty" jsonschema:"Source name, resolved to a scene item ID; refused if the source is placed more than once in the scene"`
 	DestSceneName string `json:"dest_scene_name,omitempty" jsonschema:"Destination scene name (default: same scene)"`
 }
 
 // RemoveSourceInput is the input for removing a source from a scene
 type RemoveSourceInput struct {
 	SceneName   string `json:"scene_name" jsonschema:"Name of the scene containing the source"`
-	SceneItemID int    `json:"scene_item_id" jsonschema:"Scene item ID of the source to remove"`
+	SceneItemID int    `json:"scene_item_id,omitempty" jsonschema:"Scene item ID; omit if source_name is given"`
+	SourceName  string `json:"source_name,omitempty" jsonschema:"Source name, resolved to a scene item ID; refused if the source is placed more than once in the scene"`
 }
 
 // Filter tool input types (FB-23)
@@ -2148,10 +2156,17 @@ func (s *Server) handleCreateMediaSource(ctx context.Context, request *mcpsdk.Ca
 // handleSetSourceTransform sets the position, scale, and rotation of a source
 func (s *Server) handleSetSourceTransform(ctx context.Context, request *mcpsdk.CallToolRequest, input SetSourceTransformInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Setting transform for scene item %d in scene '%s'", input.SceneItemID, input.SceneName)
+
+	// Accept either the id or the source name. (FB-70)
+	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
+	if err != nil {
+		s.recordAction("set_source_transform", "Set source transform", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+	log.Printf("Setting transform for scene item %d in scene '%s'", sceneItemID, input.SceneName)
 
 	// Get current transform first
-	current, err := s.obsClient.GetSceneItemTransform(input.SceneName, input.SceneItemID)
+	current, err := s.obsClient.GetSceneItemTransform(input.SceneName, sceneItemID)
 	if err != nil {
 		s.recordAction("set_source_transform", "Set source transform", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to get current transform: %w", err)
@@ -2174,14 +2189,14 @@ func (s *Server) handleSetSourceTransform(ctx context.Context, request *mcpsdk.C
 		current.Rotation = *input.Rotation
 	}
 
-	if err := s.obsClient.SetSceneItemTransform(input.SceneName, input.SceneItemID, current); err != nil {
+	if err := s.obsClient.SetSceneItemTransform(input.SceneName, sceneItemID, current); err != nil {
 		s.recordAction("set_source_transform", "Set source transform", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to set transform: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"scene_name":    input.SceneName,
-		"scene_item_id": input.SceneItemID,
+		"scene_item_id": sceneItemID,
 		"x":             current.PositionX,
 		"y":             current.PositionY,
 		"scale_x":       current.ScaleX,
@@ -2196,9 +2211,16 @@ func (s *Server) handleSetSourceTransform(ctx context.Context, request *mcpsdk.C
 // handleGetSourceTransform gets the current transform properties of a source
 func (s *Server) handleGetSourceTransform(ctx context.Context, request *mcpsdk.CallToolRequest, input GetSourceTransformInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Getting transform for scene item %d in scene '%s'", input.SceneItemID, input.SceneName)
 
-	transform, err := s.obsClient.GetSceneItemTransform(input.SceneName, input.SceneItemID)
+	// Accept either the id or the source name. (FB-70)
+	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
+	if err != nil {
+		s.recordAction("get_source_transform", "Get source transform", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+	log.Printf("Getting transform for scene item %d in scene '%s'", sceneItemID, input.SceneName)
+
+	transform, err := s.obsClient.GetSceneItemTransform(input.SceneName, sceneItemID)
 	if err != nil {
 		s.recordAction("get_source_transform", "Get source transform", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to get transform: %w", err)
@@ -2206,7 +2228,7 @@ func (s *Server) handleGetSourceTransform(ctx context.Context, request *mcpsdk.C
 
 	result := map[string]interface{}{
 		"scene_name":    input.SceneName,
-		"scene_item_id": input.SceneItemID,
+		"scene_item_id": sceneItemID,
 		"x":             transform.PositionX,
 		"y":             transform.PositionY,
 		"scale_x":       transform.ScaleX,
@@ -2231,10 +2253,17 @@ func (s *Server) handleGetSourceTransform(ctx context.Context, request *mcpsdk.C
 // handleSetSourceCrop sets the crop values for a source
 func (s *Server) handleSetSourceCrop(ctx context.Context, request *mcpsdk.CallToolRequest, input SetSourceCropInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Setting crop for scene item %d in scene '%s'", input.SceneItemID, input.SceneName)
+
+	// Accept either the id or the source name. (FB-70)
+	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
+	if err != nil {
+		s.recordAction("set_source_crop", "Set source crop", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+	log.Printf("Setting crop for scene item %d in scene '%s'", sceneItemID, input.SceneName)
 
 	// Get current transform
-	current, err := s.obsClient.GetSceneItemTransform(input.SceneName, input.SceneItemID)
+	current, err := s.obsClient.GetSceneItemTransform(input.SceneName, sceneItemID)
 	if err != nil {
 		s.recordAction("set_source_crop", "Set source crop", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to get current transform: %w", err)
@@ -2246,14 +2275,14 @@ func (s *Server) handleSetSourceCrop(ctx context.Context, request *mcpsdk.CallTo
 	current.CropLeft = input.CropLeft
 	current.CropRight = input.CropRight
 
-	if err := s.obsClient.SetSceneItemTransform(input.SceneName, input.SceneItemID, current); err != nil {
+	if err := s.obsClient.SetSceneItemTransform(input.SceneName, sceneItemID, current); err != nil {
 		s.recordAction("set_source_crop", "Set source crop", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to set crop: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"scene_name":    input.SceneName,
-		"scene_item_id": input.SceneItemID,
+		"scene_item_id": sceneItemID,
 		"crop_top":      input.CropTop,
 		"crop_bottom":   input.CropBottom,
 		"crop_left":     input.CropLeft,
@@ -2267,10 +2296,17 @@ func (s *Server) handleSetSourceCrop(ctx context.Context, request *mcpsdk.CallTo
 // handleSetSourceBounds sets the bounds type and size for a source
 func (s *Server) handleSetSourceBounds(ctx context.Context, request *mcpsdk.CallToolRequest, input SetSourceBoundsInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Setting bounds for scene item %d in scene '%s'", input.SceneItemID, input.SceneName)
+
+	// Accept either the id or the source name. (FB-70)
+	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
+	if err != nil {
+		s.recordAction("set_source_bounds", "Set source bounds", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+	log.Printf("Setting bounds for scene item %d in scene '%s'", sceneItemID, input.SceneName)
 
 	// Get current transform
-	current, err := s.obsClient.GetSceneItemTransform(input.SceneName, input.SceneItemID)
+	current, err := s.obsClient.GetSceneItemTransform(input.SceneName, sceneItemID)
 	if err != nil {
 		s.recordAction("set_source_bounds", "Set source bounds", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to get current transform: %w", err)
@@ -2281,14 +2317,14 @@ func (s *Server) handleSetSourceBounds(ctx context.Context, request *mcpsdk.Call
 	current.BoundsWidth = input.BoundsWidth
 	current.BoundsHeight = input.BoundsHeight
 
-	if err := s.obsClient.SetSceneItemTransform(input.SceneName, input.SceneItemID, current); err != nil {
+	if err := s.obsClient.SetSceneItemTransform(input.SceneName, sceneItemID, current); err != nil {
 		s.recordAction("set_source_bounds", "Set source bounds", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to set bounds: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"scene_name":    input.SceneName,
-		"scene_item_id": input.SceneItemID,
+		"scene_item_id": sceneItemID,
 		"bounds_type":   input.BoundsType,
 		"bounds_width":  input.BoundsWidth,
 		"bounds_height": input.BoundsHeight,
@@ -2301,16 +2337,23 @@ func (s *Server) handleSetSourceBounds(ctx context.Context, request *mcpsdk.Call
 // handleSetSourceOrder sets the z-order index of a source
 func (s *Server) handleSetSourceOrder(ctx context.Context, request *mcpsdk.CallToolRequest, input SetSourceOrderInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Setting order for scene item %d in scene '%s' to index %d", input.SceneItemID, input.SceneName, input.Index)
 
-	if err := s.obsClient.SetSceneItemIndex(input.SceneName, input.SceneItemID, input.Index); err != nil {
+	// Accept either the id or the source name. (FB-70)
+	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
+	if err != nil {
+		s.recordAction("set_source_order", "Set source order", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+	log.Printf("Setting order for scene item %d in scene '%s' to index %d", sceneItemID, input.SceneName, input.Index)
+
+	if err := s.obsClient.SetSceneItemIndex(input.SceneName, sceneItemID, input.Index); err != nil {
 		s.recordAction("set_source_order", "Set source order", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to set order: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"scene_name":    input.SceneName,
-		"scene_item_id": input.SceneItemID,
+		"scene_item_id": sceneItemID,
 		"index":         input.Index,
 		"message":       fmt.Sprintf("Successfully set source order to index %d", input.Index),
 	}
@@ -2321,9 +2364,16 @@ func (s *Server) handleSetSourceOrder(ctx context.Context, request *mcpsdk.CallT
 // handleSetSourceLocked locks or unlocks a source
 func (s *Server) handleSetSourceLocked(ctx context.Context, request *mcpsdk.CallToolRequest, input SetSourceLockedInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Setting locked=%v for scene item %d in scene '%s'", input.Locked, input.SceneItemID, input.SceneName)
 
-	if err := s.obsClient.SetSceneItemLocked(input.SceneName, input.SceneItemID, input.Locked); err != nil {
+	// Accept either the id or the source name. (FB-70)
+	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
+	if err != nil {
+		s.recordAction("set_source_locked", "Set source locked", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+	log.Printf("Setting locked=%v for scene item %d in scene '%s'", input.Locked, sceneItemID, input.SceneName)
+
+	if err := s.obsClient.SetSceneItemLocked(input.SceneName, sceneItemID, input.Locked); err != nil {
 		s.recordAction("set_source_locked", "Set source locked", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to set locked state: %w", err)
 	}
@@ -2335,7 +2385,7 @@ func (s *Server) handleSetSourceLocked(ctx context.Context, request *mcpsdk.Call
 
 	result := map[string]interface{}{
 		"scene_name":    input.SceneName,
-		"scene_item_id": input.SceneItemID,
+		"scene_item_id": sceneItemID,
 		"locked":        input.Locked,
 		"message":       fmt.Sprintf("Successfully %s source", status),
 	}
@@ -2346,13 +2396,20 @@ func (s *Server) handleSetSourceLocked(ctx context.Context, request *mcpsdk.Call
 // handleDuplicateSource duplicates a source within the same scene or to another scene
 func (s *Server) handleDuplicateSource(ctx context.Context, request *mcpsdk.CallToolRequest, input DuplicateSourceInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
+
+	// Accept either the id or the source name. (FB-70)
+	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
+	if err != nil {
+		s.recordAction("duplicate_source", "Duplicate source", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
 	destScene := input.DestSceneName
 	if destScene == "" {
 		destScene = input.SceneName
 	}
-	log.Printf("Duplicating scene item %d from scene '%s' to '%s'", input.SceneItemID, input.SceneName, destScene)
+	log.Printf("Duplicating scene item %d from scene '%s' to '%s'", sceneItemID, input.SceneName, destScene)
 
-	newItemID, err := s.obsClient.DuplicateSceneItem(input.SceneName, input.SceneItemID, destScene)
+	newItemID, err := s.obsClient.DuplicateSceneItem(input.SceneName, sceneItemID, destScene)
 	if err != nil {
 		s.recordAction("duplicate_source", "Duplicate source", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to duplicate source: %w", err)
@@ -2360,7 +2417,7 @@ func (s *Server) handleDuplicateSource(ctx context.Context, request *mcpsdk.Call
 
 	result := map[string]interface{}{
 		"source_scene":      input.SceneName,
-		"source_item_id":    input.SceneItemID,
+		"source_item_id":    sceneItemID,
 		"dest_scene":        destScene,
 		"new_scene_item_id": newItemID,
 		"message":           fmt.Sprintf("Successfully duplicated source to scene '%s' with item ID %d", destScene, newItemID),
@@ -2372,16 +2429,23 @@ func (s *Server) handleDuplicateSource(ctx context.Context, request *mcpsdk.Call
 // handleRemoveSource removes a source from a scene
 func (s *Server) handleRemoveSource(ctx context.Context, request *mcpsdk.CallToolRequest, input RemoveSourceInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Removing scene item %d from scene '%s'", input.SceneItemID, input.SceneName)
 
-	if err := s.obsClient.RemoveSceneItem(input.SceneName, input.SceneItemID); err != nil {
+	// Accept either the id or the source name. (FB-70)
+	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
+	if err != nil {
+		s.recordAction("remove_source", "Remove source", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+	log.Printf("Removing scene item %d from scene '%s'", sceneItemID, input.SceneName)
+
+	if err := s.obsClient.RemoveSceneItem(input.SceneName, sceneItemID); err != nil {
 		s.recordAction("remove_source", "Remove source", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to remove source: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"scene_name":    input.SceneName,
-		"scene_item_id": input.SceneItemID,
+		"scene_item_id": sceneItemID,
 		"message":       "Successfully removed source from scene",
 	}
 	s.recordAction("remove_source", "Remove source", input, result, true, time.Since(start))
