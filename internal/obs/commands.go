@@ -344,6 +344,32 @@ func (c *Client) GetSourceSettings(sourceName string) (map[string]interface{}, e
 	return resp.InputSettings, nil
 }
 
+// SetSceneItemEnabled sets a scene item's visibility to an explicit state.
+//
+// Prefer this over ToggleSourceVisibility whenever the caller knows the state it
+// wants. A toggle is not idempotent: a retry, a duplicate event or two rules
+// firing on the same item leave it in the opposite state to the one intended.
+// obs-websocket has always had SetSceneItemEnabled -- it was used privately here
+// but never exposed, which is why the automation executor ended up toggling when
+// asked to set. (FB-55)
+func (c *Client) SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error {
+	client, err := c.getClient()
+	if err != nil {
+		return err
+	}
+
+	_, err = client.SceneItems.SetSceneItemEnabled(&sceneitems.SetSceneItemEnabledParams{
+		SceneName:        &sceneName,
+		SceneItemId:      &sceneItemID,
+		SceneItemEnabled: &enabled,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set visibility for item %d in scene '%s': %w", sceneItemID, sceneName, err)
+	}
+
+	return nil
+}
+
 // ToggleSourceVisibility toggles the visibility of a source in a specific scene.
 func (c *Client) ToggleSourceVisibility(sceneName string, sourceID int) (bool, error) {
 	client, err := c.getClient()

@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -110,6 +111,19 @@ func (m *MockOBSClient) ToggleSourceVisibility(sceneName string, sourceID int) (
 	defer m.mu.Unlock()
 	m.actions = append(m.actions, "toggle_visibility")
 	return true, nil
+}
+
+// SetSceneItemEnabled records the requested state so tests can tell a set from a
+// toggle, which is the whole point of FB-55.
+func (m *MockOBSClient) SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failNextCall {
+		m.failNextCall = false
+		return fmt.Errorf("mock OBS error")
+	}
+	m.actions = append(m.actions, fmt.Sprintf("set_visibility:%s:%d:%t", sceneName, sceneItemID, enabled))
+	return nil
 }
 
 func (m *MockOBSClient) ToggleVirtualCam() (bool, error) {

@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`toggle_source_visibility` accepts an explicit state (FB-55)** — pass
+  `visible: true`/`false` to set the state directly, or omit it to keep the
+  previous toggle behaviour. A bare toggle is not safe to retry: if a call times
+  out and the caller repeats it, the source ends up back where it started. This
+  mirrors `toggle_source_filter`, which already worked this way.
 - **`list_audio_devices` and `create_audio_input`** — enumerate Windows WASAPI
   playback and recording devices and add a capture source to a scene.
   `device_kind` selects the direction: `output` for playback devices such as a
@@ -23,6 +28,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`automation-setup` prompt (FB-20 follow-up)** — 14th MCP workflow prompt; guides users through creating, testing, and monitoring automation rules. Accepts optional `rule_type` ('event'|'schedule') and `trigger_event` arguments for targeted guidance.
 
 ### Fixed
+- **`set_visibility` automation action toggled instead of setting (FB-55)** — the
+  executor delegated to `toggleVisibility` under a comment claiming obs-websocket
+  had no setter. It has one, and `internal/obs` was already calling it privately;
+  it simply was not on the client interface. A rule asking for `visible=true`
+  flipped the item instead, so firing it twice hid what it was meant to show, and
+  any invariant built on the action would oscillate by construction.
+  `SetSceneItemEnabled` is now exposed on both client interfaces and the action
+  sets the state it was given.
 - **Scene item transforms silently re-anchored items (FB-54)** — `obs.SceneItemTransform`
   carried no `Alignment`, `BoundsAlignment` or `CropToBounds` field. goobs marshals
   the wire struct with no `omitempty` and obs-websocket applies any transform key

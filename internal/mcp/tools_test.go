@@ -2741,3 +2741,65 @@ func TestSetSourceTransformPreservesAlignment(t *testing.T) {
 		assert.Equal(t, 5, after.Alignment, "set_source_crop must not re-anchor the item")
 	})
 }
+
+// TestToggleSourceVisibilityExplicitState covers the optional `visible` parameter
+// added in FB-55.
+//
+// A bare toggle is not safe to retry: if a call times out and the agent repeats
+// it, the item ends up back where it started. Supplying an explicit state makes
+// the operation idempotent, which is also what any future reconciliation loop
+// needs. The behaviour mirrors toggle_source_filter, which already worked this
+// way.
+func TestToggleSourceVisibilityExplicitState(t *testing.T) {
+	visible := func(t *testing.T, mock *testutil.MockOBSClient, scene string, id int) bool {
+		t.Helper()
+		sc, err := mock.GetSceneByName(scene)
+		require.NoError(t, err)
+		for _, item := range sc.Sources {
+			if item.ID == id {
+				return item.Enabled
+			}
+		}
+		t.Fatalf("scene item %d not found in %q", id, scene)
+		return false
+	}
+
+	t.Run("explicit true is idempotent across repeats", func(t *testing.T) {
+		server, mock := testServer(t)
+		want := true
+
+		for i := 0; i < 3; i++ {
+			_, result, err := server.handleToggleSourceVisibility(context.Background(), nil,
+				SourceVisibilityInput{SceneName: "Scene 1", SourceID: 1, Visible: &want})
+			require.NoError(t, err)
+			assert.Equal(t, true, result.(map[string]interface{})["visible"],
+				"call %d should report visible=true", i+1)
+		}
+
+		assert.True(t, visible(t, mock, "Scene 1", 1),
+			"three identical requests must leave the item visible, not flip it")
+	})
+
+	t.Run("explicit false hides", func(t *testing.T) {
+		server, mock := testServer(t)
+		want := false
+
+		_, _, err := server.handleToggleSourceVisibility(context.Background(), nil,
+			SourceVisibilityInput{SceneName: "Scene 1", SourceID: 1, Visible: &want})
+		require.NoError(t, err)
+
+		assert.False(t, visible(t, mock, "Scene 1", 1))
+	})
+
+	t.Run("omitting visible still toggles", func(t *testing.T) {
+		server, mock := testServer(t)
+		before := visible(t, mock, "Scene 1", 1)
+
+		_, _, err := server.handleToggleSourceVisibility(context.Background(), nil,
+			SourceVisibilityInput{SceneName: "Scene 1", SourceID: 1})
+		require.NoError(t, err)
+
+		assert.Equal(t, !before, visible(t, mock, "Scene 1", 1),
+			"with no explicit state the tool must keep its original toggle behaviour")
+	})
+}

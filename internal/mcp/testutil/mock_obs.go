@@ -47,6 +47,7 @@ type MockOBSClient struct {
 	ErrorOnStopStreaming       error
 	ErrorOnListSources         error
 	ErrorOnGetSourceSettings   error
+	ErrorOnSetSceneItemEnabled error
 	ErrorOnToggleVisibility    error
 	ErrorOnGetInputMute        error
 	ErrorOnToggleInputMute     error
@@ -694,6 +695,34 @@ func (m *MockOBSClient) GetSourceSettings(sourceName string) (map[string]interfa
 }
 
 // ToggleSourceVisibility simulates toggling source visibility.
+// SetSceneItemEnabled sets a scene item's visibility to an explicit state.
+func (m *MockOBSClient) SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.ErrorOnSetSceneItemEnabled != nil {
+		return m.ErrorOnSetSceneItemEnabled
+	}
+
+	if !m.connected {
+		return fmt.Errorf("not connected to OBS")
+	}
+
+	items, exists := m.sceneItems[sceneName]
+	if !exists {
+		return fmt.Errorf("scene '%s' not found", sceneName)
+	}
+
+	for i, item := range items {
+		if item.ID == sceneItemID {
+			m.sceneItems[sceneName][i].Enabled = enabled
+			return nil
+		}
+	}
+
+	return fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
+}
+
 func (m *MockOBSClient) ToggleSourceVisibility(sceneName string, sourceID int) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
