@@ -481,6 +481,14 @@ func (s *Server) registerToolHandlers() {
 			s.handleGetOBSStatus,
 		)
 
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
+				Name:        "call_vendor_request",
+				Description: "Call a request registered by a third-party OBS plugin or script. The extension channel for anything obs-websocket does not implement itself, such as Advanced Scene Switcher macros or obs-browser page events",
+			},
+			s.handleCallVendorRequest,
+		)
+
 		// Virtual camera tools (FB-25)
 		mcpsdk.AddTool(s.mcpServer,
 			&mcpsdk.Tool{
@@ -581,8 +589,8 @@ func (s *Server) registerToolHandlers() {
 			s.handleListHotkeys,
 		)
 
-		toolCount += 25
-		log.Println("Core tools registered (25 tools)")
+		toolCount += 26
+		log.Println("Core tools registered (26 tools)")
 	}
 
 	// Source tools

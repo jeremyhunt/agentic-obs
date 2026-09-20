@@ -201,6 +201,70 @@ var toolHelpContent = map[string]string{
 }`,
 
 	// Core - Status
+	"call_vendor_request": `# call_vendor_request
+
+**Category**: Core
+
+**Description**: Call a request registered by a third-party OBS plugin or
+script. A "vendor" is a name a plugin registers with obs-websocket, and this is
+the only way to reach anything obs-websocket does not implement itself.
+
+**Input**:
+- vendor_name (string, required): The name the plugin registered
+- request_type (string, required): The vendor's own request name
+- request_data (object, optional): Payload defined by the vendor; defaults to {}
+
+**Output**:
+- vendor_name, request_type: echoed back
+- response_data: whatever the vendor returned, passed through untouched ({} if
+  the vendor returns nothing)
+
+## Advanced Scene Switcher
+
+Run a macro by name:
+{
+  "vendor_name": "AdvancedSceneSwitcher",
+  "request_type": "AdvancedSceneSwitcherRunMacro",
+  "request_data": { "macro": "PersonaShow_Sonic" }
+}
+
+ASS returns no useful data, so an empty response_data means it worked.
+
+## obs-browser: pushing events into an overlay page
+
+obs-browser registers a vendor in every OBS build that ships the browser source:
+{
+  "vendor_name": "obs-browser",
+  "request_type": "emit_event",
+  "request_data": { "event_name": "song-changed", "event_data": { "title": "..." } }
+}
+
+The page receives it as a DOM event:
+  window.addEventListener('song-changed', e => console.log(e.detail))
+
+**This broadcasts to every browser source**, not just one, so a page must check
+that the event is meant for it. There is no targeted variant over the websocket.
+
+Overlay pages can also listen for events obs-browser pushes on its own --
+obsSceneChanged, obsSourceVisibleChanged, and the streaming and recording state
+changes -- plus window.obsstudio for version and control functions. A page that
+only needs to react to OBS state may not need this tool at all.
+
+**Discovering vendors**: obs-websocket has no way to list them, so the only way
+to learn whether a plugin is present is to call it. The refusal tells you which
+of two things went wrong -- both are ResourceNotFound (600), but the messages
+differ:
+
+- "No vendor was found by that name."  -> the plugin is not installed
+- "No request was found by that name." -> the plugin IS installed, but does not
+  register that request type
+
+So a probe is reliable: call any request name on the vendor, and a "no request"
+answer confirms the plugin is there. Verified against OBS 32.2.2.
+
+**Use Case**: Reach plugin functionality with no tool of its own, rather than
+waiting for one to be added.`,
+
 	"get_obs_status": `# get_obs_status
 
 **Category**: Core - Status

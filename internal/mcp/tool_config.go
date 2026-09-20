@@ -40,7 +40,7 @@ var toolGroupMetadata = map[string]*ToolGroupMetadata{
 			"get_virtual_cam_status", "toggle_virtual_cam",
 			"get_replay_buffer_status", "toggle_replay_buffer", "save_replay_buffer", "get_last_replay",
 			"get_studio_mode_enabled", "toggle_studio_mode", "get_preview_scene", "set_preview_scene",
-			"list_hotkeys", "trigger_hotkey_by_name",
+			"list_hotkeys", "trigger_hotkey_by_name", "call_vendor_request",
 		},
 	},
 	"Sources": {

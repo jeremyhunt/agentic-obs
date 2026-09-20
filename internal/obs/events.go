@@ -59,6 +59,12 @@ const (
 	// Preview scene events. In studio mode the preview scene is what goes live
 	// on the next transition, so which scene is queued is state worth reporting.
 	EventTypePreviewSceneChanged EventType = "preview_scene_changed"
+
+	// Vendor events. A vendor is a name a third-party plugin or script
+	// registers with obs-websocket, and this is the only way one can speak back
+	// to a client -- Advanced Scene Switcher, obs-browser, and any in-OBS
+	// script that registers one. (FB-77)
+	EventTypeVendorEvent EventType = "vendor_event"
 )
 
 // NewEventHandler creates a new event handler with the specified notification function.

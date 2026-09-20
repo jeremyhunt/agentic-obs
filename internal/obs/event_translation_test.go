@@ -131,6 +131,24 @@ func TestEventFromTranslatesEveryHandledEvent(t *testing.T) {
 			payload: map[string]interface{}{"enabled": true},
 		},
 		{
+			// The only inbound channel from a plugin. FB-62 subscribed to the
+			// Vendors category and the events have been arriving and being
+			// dropped ever since; this is the handler they were waiting for.
+			// (FB-77)
+			name: "vendor event",
+			raw: &events.VendorEvent{
+				VendorName: "AdvancedSceneSwitcher",
+				EventType:  "MacroRun",
+				EventData:  map[string]any{"macro": "PersonaShow_Sonic"},
+			},
+			want: EventTypeVendorEvent,
+			payload: map[string]interface{}{
+				"vendor_name": "AdvancedSceneSwitcher",
+				"event_type":  "MacroRun",
+				"event_data":  map[string]any{"macro": "PersonaShow_Sonic"},
+			},
+		},
+		{
 			// In studio mode the preview scene is what goes live on the next
 			// transition, so "which scene is queued" is real state an agent can
 			// act on. Nothing in this repo heard about it changing. (FB-65)
@@ -168,7 +186,6 @@ func TestEventFromTranslatesEveryHandledEvent(t *testing.T) {
 func TestEventFromIgnoresUnhandledEvents(t *testing.T) {
 	for _, raw := range []any{
 		&events.SourceFilterEnableStateChanged{},
-		&events.VendorEvent{},
 		nil,
 	} {
 		if got, ok := eventFrom(raw, at); ok {
