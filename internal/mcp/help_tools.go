@@ -201,6 +201,65 @@ var toolHelpContent = map[string]string{
 }`,
 
 	// Core - Status
+	"apply_scene_spec": `# apply_scene_spec
+
+**Category**: Layout
+
+**Description**: Reconcile a scene to a captured spec. Creates what is missing,
+writes back what drifted, and leaves alone what the spec does not describe.
+
+**This defaults to a dry run.** Pass dry_run=false to actually change the scene.
+The scene may be on air.
+
+**Input**:
+- spec (object, required): A spec document from capture_scene_spec
+- scene_name (string, optional): Defaults to the scene the spec came from
+- dry_run (bool, optional, default TRUE): Plan without writing
+- on_unmanaged (string, optional, default "keep"): keep | hide | remove
+
+**Output**: ops[] with one entry per operation, by_result counts, and before --
+the scene as it was.
+
+**Undo**: apply the before document. Nothing else records what was replaced.
+
+**Order of operations**, fixed because the steps depend on each other:
+sources -> placements -> settings -> filters -> transform -> visibility -> lock
+-> one ordering pass -> prune.
+
+**Results**: created, updated, unchanged, skipped, failed. A failure is a
+per-op result, never an abort -- a partial apply against a live OBS is normal
+(a locked source, a moved file), and a run that stopped without saying how far
+it got is worse than one that finished and reported four failures.
+
+**A second apply reports nothing left to do.** What to write is decided by a
+diff, not written unconditionally. That matters beyond tidiness: every write is
+an event, and an automation rule watching the scene fires on each one.
+
+**What it will not do**:
+- Create a group. obs-websocket has CreateScene and no CreateGroup, so a missing
+  group is skipped with that reason. Create it in the OBS UI first
+- Create a missing nested scene. A nested scene's contents are its own spec;
+  capture and apply that one
+- Reconcile a changed input kind. That needs the source removed and recreated,
+  which destroys every placement of it in every scene, so it is reported failed
+- Remove a source. on_unmanaged=remove takes out scene *items* only. OBS
+  refcounts sources, so an input goes away by itself once nothing references it
+- Apply a spec captured with include_settings or include_filters off
+
+**on_unmanaged**: keep is the default because removing is unrecoverable -- a
+scene almost always holds sources configured by hand that the spec was never
+meant to own.
+
+**Examples**:
+- See what would change: {"spec": {...}}
+- Apply it: {"spec": {...}, "dry_run": false}
+- Make the scene match exactly: {"spec": {...}, "dry_run": false,
+  "on_unmanaged": "remove"}
+
+**Tip**: diff_scene_spec answers the same question without writing, and names
+each difference.
+`,
+
 	"diff_scene_spec": `# diff_scene_spec
 
 **Category**: Layout

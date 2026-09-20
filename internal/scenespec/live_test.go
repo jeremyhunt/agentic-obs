@@ -12,9 +12,13 @@
 package scenespec_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ironystock/agentic-obs/internal/obs"
 	"github.com/ironystock/agentic-obs/internal/scenespec"
@@ -46,6 +50,30 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// operatorScenes drops the scratch scenes other live suites are creating and
+// removing in the same OBS.
+//
+// The tests below are about the operator's collection, and a scene named
+// agentic-obs-* belongs to a test run, not to it. This is not tidiness: `go
+// test ./internal/...` builds packages in parallel and runs them concurrently,
+// so internal/obs's contract suite is creating and deleting a scratch scene per
+// row while this package is enumerating the collection. A scene that vanishes
+// between the listing and the capture then reads as a failure of the capture.
+//
+// Running the live suites with -p 1 avoids the race as well, and the Makefile
+// does, but a test that only passes when it has OBS to itself is a test that
+// will fail mysteriously one day.
+func operatorScenes(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.HasPrefix(name, "agentic-obs-") {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
 func TestLiveCaptureEveryScene(t *testing.T) {
 	client := liveClient(t)
 
@@ -53,6 +81,7 @@ func TestLiveCaptureEveryScene(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSceneList: %v", err)
 	}
+	scenes = operatorScenes(scenes)
 	if len(scenes) == 0 {
 		t.Skip("no scenes on the main canvas")
 	}
@@ -190,8 +219,12 @@ func TestLiveCaptureReadsEachSourceOnce(t *testing.T) {
 	// collection scales with placements and a layered stack becomes slow for
 	// no reason.
 	scenes, _, err := client.GetSceneList()
-	if err != nil || len(scenes) == 0 {
+	if err != nil {
 		t.Fatalf("GetSceneList: %v", err)
+	}
+	scenes = operatorScenes(scenes)
+	if len(scenes) == 0 {
+		t.Skip("no scenes on the main canvas")
 	}
 
 	// A fresh counter per scene. Sharing one across the search totals every
@@ -249,6 +282,7 @@ func TestLiveDiffOfEveryUnchangedSceneIsQuiet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSceneList: %v", err)
 	}
+	scenes = operatorScenes(scenes)
 
 	noisy := 0
 	for _, name := range scenes {
@@ -288,8 +322,12 @@ func TestLiveDiffSeesARealChange(t *testing.T) {
 	client := liveClient(t)
 
 	scenes, _, err := client.GetSceneList()
-	if err != nil || len(scenes) == 0 {
+	if err != nil {
 		t.Fatalf("GetSceneList: %v", err)
+	}
+	scenes = operatorScenes(scenes)
+	if len(scenes) == 0 {
+		t.Skip("no scenes on the main canvas")
 	}
 
 	for _, name := range scenes {
@@ -313,4 +351,134 @@ func TestLiveDiffSeesARealChange(t *testing.T) {
 		t.Fatalf("%s: a 37px difference was not reported; findings: %d", name, len(findings))
 	}
 	t.Skip("no scene with a placement carrying a transform")
+}
+
+// TestLiveCaptureDamageApplyRoundTrips is the acceptance test for the whole
+// arc, run against a real OBS.
+//
+// Unlike every other test in this file it WRITES, so it builds its own scratch
+// scene and works only inside it. The operator's scenes are never touched, and
+// the scene is removed whether the test passes or fails.
+func TestLiveCaptureDamageApplyRoundTrips(t *testing.T) {
+	client := liveClient(t)
+
+	scene := fmt.Sprintf("agentic-obs-apply-%d", time.Now().UnixNano())
+	if err := client.CreateScene(scene); err != nil {
+		t.Fatalf("CreateScene: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := client.RemoveScene(scene); err != nil {
+			t.Logf("warning: could not remove scratch scene %q: %v", scene, err)
+		}
+	})
+
+	// A stack of layers, which is the shape this collection actually uses.
+	for i, spec := range []struct {
+		name     string
+		kind     string
+		settings map[string]interface{}
+	}{
+		{scene + "-back", "color_source_v3", map[string]interface{}{"width": 800, "height": 600}},
+		{scene + "-mid", "color_source_v3", map[string]interface{}{"width": 400, "height": 300}},
+		{scene + "-front", "color_source_v3", map[string]interface{}{"width": 200, "height": 150}},
+	} {
+		id, err := client.CreateInput(scene, spec.name, spec.kind, spec.settings)
+		if err != nil {
+			t.Fatalf("CreateInput %s: %v", spec.name, err)
+		}
+		transform, err := client.GetSceneItemTransform(scene, id)
+		if err != nil {
+			t.Fatalf("GetSceneItemTransform: %v", err)
+		}
+		transform.PositionX = float64(100 * (i + 1))
+		transform.PositionY = float64(50 * (i + 1))
+		if err := client.SetSceneItemTransform(scene, id, transform); err != nil {
+			t.Fatalf("SetSceneItemTransform: %v", err)
+		}
+	}
+
+	original, err := scenespec.Capture(client, scene)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	t.Logf("captured %d sources, %d placements", len(original.Sources), len(original.Items))
+
+	// A dry run must change nothing, even against a scene that needs work.
+	live, _ := client.GetSceneByName(scene)
+	if err := client.RemoveSceneItem(scene, live.Sources[0].ID); err != nil {
+		t.Fatalf("RemoveSceneItem: %v", err)
+	}
+	if _, err := scenespec.Apply(context.Background(), client, original, scene,
+		scenespec.ApplyOptions{DryRun: true}); err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	afterDry, _ := scenespec.Capture(client, scene)
+	if len(afterDry.Items) != len(original.Items)-1 {
+		t.Errorf("a dry run changed the scene: %d placements, expected %d",
+			len(afterDry.Items), len(original.Items)-1)
+	}
+
+	// More damage: hide one, move another, change a setting.
+	live, _ = client.GetSceneByName(scene)
+	for i, item := range live.Sources {
+		switch i {
+		case 0:
+			if err := client.SetSceneItemEnabled(scene, item.ID, false); err != nil {
+				t.Fatalf("SetSceneItemEnabled: %v", err)
+			}
+		case 1:
+			transform, err := client.GetSceneItemTransform(scene, item.ID)
+			if err != nil {
+				t.Fatalf("GetSceneItemTransform: %v", err)
+			}
+			transform.PositionX += 321
+			transform.Rotation = 17
+			if err := client.SetSceneItemTransform(scene, item.ID, transform); err != nil {
+				t.Fatalf("SetSceneItemTransform: %v", err)
+			}
+			if err := client.SetSourceSettings(item.Name,
+				map[string]interface{}{"width": 77, "height": 88}, false); err != nil {
+				t.Fatalf("SetSourceSettings: %v", err)
+			}
+		}
+	}
+
+	report, err := scenespec.Apply(context.Background(), client, original, scene,
+		scenespec.ApplyOptions{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	counts := map[string]int{}
+	for _, op := range report.Ops {
+		counts[op.Result]++
+		if op.Result == scenespec.OpFailed {
+			t.Errorf("op failed: %s %s: %s", op.Op, op.Subject, op.Detail)
+		}
+	}
+	t.Logf("apply: %v", counts)
+
+	// The proof is a diff: it already knows which differences are real.
+	findings, err := scenespec.Diff(client, original, scene)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("the scene does not match the spec after applying it:")
+		for _, f := range findings {
+			t.Errorf("    %s %s .%s: %s", f.Kind, f.Subject, f.Field, f.Detail)
+		}
+	}
+
+	// And a second apply has nothing to do.
+	second, err := scenespec.Apply(context.Background(), client, original, scene,
+		scenespec.ApplyOptions{})
+	if err != nil {
+		t.Fatalf("second Apply: %v", err)
+	}
+	for _, op := range second.Ops {
+		if op.Result != scenespec.OpUnchanged && op.Result != scenespec.OpSkipped {
+			t.Errorf("the second apply still had work: %s %s -> %s (%s)",
+				op.Op, op.Subject, op.Result, op.Detail)
+		}
+	}
 }

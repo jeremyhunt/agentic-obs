@@ -7,6 +7,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Scene specs, apply (FB-84)** — `apply_scene_spec` reconciles a scene to a
+  captured spec: creates what is missing, writes back what drifted, and leaves
+  alone what the spec does not describe. **The tool defaults to a dry run**,
+  where the library function does not — a tool call is a decision made by a model
+  reading a description, and the scene may be on air. The report carries the
+  scene as it was, so applying that document undoes the apply; nothing else
+  records what was replaced.
+
+  The order is fixed because the steps depend on each other: sources →
+  placements → settings → filters → transform → visibility → lock → one ordering
+  pass → prune. **What to write is decided by a diff rather than written
+  unconditionally**, which is what makes a second apply report nothing left to
+  do. That matters beyond tidiness: every write is an event, and an automation
+  rule watching the scene fires on each one, so an apply that writes regardless
+  is indistinguishable from one that converges until something is listening.
+
+  **A failure is a per-op result, never an abort.** A partial apply against a
+  live OBS is the normal case — a locked source, a moved file — and a run that
+  stopped without saying how far it got is worse than one that finished and
+  reported four failures. Ops that depend on a failed one are skipped with the
+  cause rather than failing again for a reason that reads as unrelated.
+
+  **What it refuses to do**, each because the alternative is destructive:
+  a missing **group** is skipped, since obs-websocket has `CreateScene` and no
+  `CreateGroup`; a missing **nested scene** is skipped, because its contents are
+  its own spec and an empty scene is not what the document describes; a changed
+  **input kind** is reported failed, because reconciling it means removing and
+  recreating the source, which destroys every placement of it in every scene; and
+  `on_unmanaged: remove` takes out scene **items** only — OBS refcounts sources,
+  so an input goes away by itself once nothing references it. `keep` is the
+  default because removing is unrecoverable.
+
+  Ordering permutes managed items among the positions they already occupy.
+  Using the spec's own index would be wrong twice: an index past the end of a
+  scene holding unmanaged items is out of range, and an unmanaged item between
+  two managed ones would be shoved aside by a stack assuming it owned every slot.
+
+  Verified against a real OBS in a scratch scene: a dry run changed nothing, the
+  apply reported 1 created / 5 updated / 7 unchanged, **the post-apply diff found
+  zero differences**, and a second apply had nothing to do.
+
+### Fixed
+- **A source's existence is global, and the apply was asking the wrong question
+  (FB-84)** — it decided whether to create a source by looking at the scene being
+  applied, so a source placed in five other scenes but not this one looked
+  missing and `CreateInput` failed with `ResourceAlreadyExists`. Existence is now
+  read from `GetInputList`, `GetSceneList` and `GetGroupList`, which is where OBS
+  actually keeps it. This was the layered source/placement model being violated
+  by the package built on it.
+- **The fake gave new scene items an empty `BoundsType` (FB-84)** — obs-websocket
+  never reports one; it reports `OBS_BOUNDS_NONE` for an item with no bounding
+  box. A capture recorded `""`, the apply wrote it, `NormaliseBounds` turned it
+  into `OBS_BOUNDS_NONE`, and the scene then disagreed with the spec it had just
+  been reconciled to. Found by the round-trip test.
+- **The live suites were racing each other (FB-84)** — `go test ./internal/...`
+  builds packages in parallel and runs them concurrently, and every live package
+  talks to the same OBS. `internal/obs`'s contract suite creates and removes a
+  scratch scene per row while `internal/scenespec` is enumerating the collection,
+  so a scene that vanished between the listing and the capture read as a failure.
+  The collection-wide tests now ignore `agentic-obs-*` scenes, which belong to a
+  test run rather than to the operator, and `make test-live` passes `-p 1` and
+  covers both packages rather than only `internal/obs`.
+
 - **Scene specs, diff (FB-83)** — `diff_scene_spec` compares a captured spec
   against the live scene and classifies each difference as `drift`, `missing`,
   `unmanaged`, `kind_mismatch` or `renamed`. It is read-only, and the findings

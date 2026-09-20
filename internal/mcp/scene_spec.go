@@ -149,3 +149,89 @@ func (s *Server) handleDiffSceneSpec(ctx context.Context, request *mcpsdk.CallTo
 	s.recordAction("diff_scene_spec", "Diff scene spec", input, result, true, time.Since(start))
 	return nil, result, nil
 }
+
+// ApplySceneSpecInput is the input for reconciling a scene to a spec.
+type ApplySceneSpecInput struct {
+	Spec      *scenespec.Spec `json:"spec" jsonschema:"A spec document, as returned by capture_scene_spec"`
+	SceneName string          `json:"scene_name,omitempty" jsonschema:"Scene to apply to. Defaults to the scene the spec was captured from"`
+
+	DryRun      *bool  `json:"dry_run,omitempty" jsonschema:"Plan without writing. DEFAULTS TO TRUE: pass false to actually change the scene"`
+	OnUnmanaged string `json:"on_unmanaged,omitempty" jsonschema:"What to do with things the scene has and the spec does not: keep (default), hide, or remove. remove takes out scene items only and never the sources behind them"`
+}
+
+// handleApplySceneSpec reconciles a scene to a spec.
+//
+// dry_run defaults to **true** here, where the library function defaults it to
+// false. The difference is deliberate: a tool call is a decision made by a model
+// reading a description, and the scene may be on air. Planning first and saying
+// what would change costs one extra call; writing to a live scene by accident
+// costs a broadcast.
+//
+// The report carries the scene as it was, so applying that document puts it
+// back. (FB-84)
+func (s *Server) handleApplySceneSpec(ctx context.Context, request *mcpsdk.CallToolRequest, input ApplySceneSpecInput) (*mcpsdk.CallToolResult, any, error) {
+	start := time.Now()
+
+	fail := func(err error) (*mcpsdk.CallToolResult, any, error) {
+		s.recordAction("apply_scene_spec", "Apply scene spec", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+
+	if input.Spec == nil {
+		return fail(fmt.Errorf("spec is required; capture one with capture_scene_spec"))
+	}
+
+	scene := strings.TrimSpace(input.SceneName)
+	if scene == "" {
+		scene = input.Spec.Scene
+	}
+	if scene == "" {
+		return fail(fmt.Errorf("scene_name is required: this spec does not name the scene it came from"))
+	}
+
+	dryRun := true
+	if input.DryRun != nil {
+		dryRun = *input.DryRun
+	}
+
+	switch input.OnUnmanaged {
+	case "", scenespec.UnmanagedKeep, scenespec.UnmanagedHide, scenespec.UnmanagedRemove:
+	default:
+		return fail(fmt.Errorf("on_unmanaged must be keep, hide or remove; got %q", input.OnUnmanaged))
+	}
+
+	log.Printf("Applying scene spec to %s (dry_run=%v)", scene, dryRun)
+
+	report, err := scenespec.Apply(ctx, s.obsClient, input.Spec, scene, scenespec.ApplyOptions{
+		DryRun:      dryRun,
+		OnUnmanaged: input.OnUnmanaged,
+	})
+	if err != nil {
+		return fail(fmt.Errorf("applying to scene %q: %w", scene, err))
+	}
+
+	counts := map[string]int{}
+	for _, op := range report.Ops {
+		counts[op.Result]++
+	}
+
+	result := map[string]interface{}{
+		"scene":     report.Scene,
+		"dry_run":   report.DryRun,
+		"ops":       report.Ops,
+		"by_result": counts,
+		"before":    report.Before,
+	}
+	if report.DryRun {
+		result["note"] = "Nothing was changed. Pass dry_run=false to apply these operations."
+	} else {
+		result["note"] = "`before` is the scene as it was; applying that document undoes this."
+	}
+	if counts[scenespec.OpFailed] > 0 {
+		result["note"] = fmt.Sprintf("%d operation(s) failed; the rest were applied. %v",
+			counts[scenespec.OpFailed], result["note"])
+	}
+
+	s.recordAction("apply_scene_spec", "Apply scene spec", input, result, true, time.Since(start))
+	return nil, result, nil
+}
