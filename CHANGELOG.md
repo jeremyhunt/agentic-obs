@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`list_audio_devices` and `create_audio_input`** — enumerate Windows WASAPI
+  playback and recording devices and add a capture source to a scene.
+  `device_kind` selects the direction: `output` for playback devices such as a
+  Voicemeeter virtual output carrying TTS, `input` for microphones. Windows only.
 - **Environment variable aliases (FB-52)** — `OBS_WEBSOCKET_*` and `OBS_API_*` are
   now accepted as aliases for `OBS_HOST`/`OBS_PORT`/`OBS_PASSWORD` when the
   canonical name is unset, with the chosen source logged. Documented in the README.
