@@ -90,3 +90,76 @@ func TestLiveClientSatisfiesContract(t *testing.T) {
 		}
 	})
 }
+
+// recordingSink collects translated events for the live event test.
+type recordingSink struct {
+	events chan obs.Event
+}
+
+func (s recordingSink) HandleEvent(e obs.Event) {
+	select {
+	case s.events <- e:
+	default: // never block the client's event goroutine
+	}
+}
+
+// TestLiveEventsReachTheSink is the end-to-end proof that events flow at all.
+//
+// Nothing else covers this. The translation table is unit-tested and the
+// subscription mask is unit-tested, but whether OBS actually pushes an event we
+// asked for, and whether it survives goobs and the sink, is only answerable
+// against a real server. It is also the test that would have caught FB-62: a
+// category missing from the mask produces no error, just silence.
+func TestLiveEventsReachTheSink(t *testing.T) {
+	client := liveClient(t)
+
+	scene := fmt.Sprintf("agentic-obs-events-%d", time.Now().UnixNano())
+	if err := client.CreateScene(scene); err != nil {
+		t.Fatalf("CreateScene: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := client.RemoveScene(scene); err != nil {
+			t.Logf("warning: could not remove scratch scene %q: %v", scene, err)
+		}
+	})
+
+	itemID, err := client.CreateInput(scene, scene+"-item", "color_source_v3", nil)
+	if err != nil {
+		t.Fatalf("CreateInput: %v", err)
+	}
+
+	sink := recordingSink{events: make(chan obs.Event, 32)}
+	client.SetEventSink(sink)
+
+	// Hiding the item is a state change OBS announces via
+	// SceneItemEnableStateChanged, which needs the SceneItems subscription.
+	if err := client.SetSceneItemEnabled(scene, itemID, false); err != nil {
+		t.Fatalf("SetSceneItemEnabled: %v", err)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sink.events:
+			if e.Type != obs.EventTypeSourceVisibilityChanged {
+				continue // other events on the same connection are fine
+			}
+			if got := e.Payload["scene_name"]; got != scene {
+				continue // a visibility change elsewhere in the collection
+			}
+			if got := e.Payload["visible"]; got != false {
+				t.Errorf("event reports visible=%v, want false", got)
+			}
+			if got := e.Payload["scene_item_id"]; got != itemID {
+				t.Errorf("event reports scene_item_id=%v, want %d", got, itemID)
+			}
+			if e.At.IsZero() {
+				t.Error("event carries no timestamp")
+			}
+			return
+		case <-deadline:
+			t.Fatal("no visibility event arrived within 5s; either OBS did not send it " +
+				"or the subscription mask does not include SceneItems")
+		}
+	}
+}

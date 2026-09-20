@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/andreykaipov/goobs"
-	"github.com/andreykaipov/goobs/api/events"
 	"github.com/andreykaipov/goobs/api/events/subscriptions"
 	"github.com/andreykaipov/goobs/api/requests/general"
 )
@@ -32,7 +31,7 @@ type Client struct {
 	monitorStarted atomic.Bool // Guards the single monitorConnection goroutine
 
 	// Event handlers
-	eventCallback EventCallback
+	eventSink EventSink
 
 	// Context for managing lifecycle
 	ctx    context.Context
@@ -139,10 +138,27 @@ func NewClient(config ConnectionConfig) *Client {
 
 // SetEventCallback registers a callback handler for OBS events.
 // This should be called before Connect() to ensure no events are missed.
+//
+// Deprecated: prefer SetEventSink. EventCallback has one method per event kind,
+// so every new kind widens it and breaks every implementer -- which is why
+// categories this client subscribes to still have no handler. Callbacks
+// registered here are adapted to a sink and keep working.
 func (c *Client) SetEventCallback(callback EventCallback) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.eventCallback = callback
+	if callback == nil {
+		c.eventSink = nil
+		return
+	}
+	c.eventSink = callbackSink{cb: callback}
+}
+
+// SetEventSink registers a sink for OBS events. Call it before Connect so no
+// events are missed.
+func (c *Client) SetEventSink(sink EventSink) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.eventSink = sink
 }
 
 // Connect establishes a connection to OBS WebSocket server.
@@ -359,84 +375,31 @@ func (c *Client) setupEventHandlers() error {
 	return nil
 }
 
-// handleEvents processes incoming OBS events and dispatches to the callback.
+// handleEvents translates incoming OBS events and hands them to the sink.
+//
+// The translation itself lives in eventFrom, which is a pure function and
+// therefore testable; this loop is only plumbing. It used to be a ~70-line
+// switch inline here, unreachable by any test that did not have OBS running.
 func (c *Client) handleEvents() {
-	for event := range c.client.IncomingEvents {
+	for raw := range c.client.IncomingEvents {
 		c.mu.RLock()
-		callback := c.eventCallback
+		sink := c.eventSink
 		c.mu.RUnlock()
 
-		if callback == nil {
-			continue // No callback registered
+		if sink == nil {
+			continue // Nothing registered
 		}
 
-		// Dispatch based on event type
-		switch e := event.(type) {
-		// Scene events
-		case *events.SceneCreated:
-			callback.OnSceneCreated(e.SceneName)
-
-		case *events.SceneRemoved:
-			callback.OnSceneRemoved(e.SceneName)
-
-		case *events.CurrentProgramSceneChanged:
-			callback.OnCurrentProgramSceneChanged(e.SceneName)
-
-		// Recording events
-		case *events.RecordStateChanged:
-			switch {
-			case e.OutputActive && e.OutputState == "OBS_WEBSOCKET_OUTPUT_STARTED":
-				callback.OnRecordingStarted()
-			case !e.OutputActive && e.OutputState == "OBS_WEBSOCKET_OUTPUT_STOPPED":
-				callback.OnRecordingStopped(e.OutputPath)
-			case e.OutputState == "OBS_WEBSOCKET_OUTPUT_PAUSED":
-				callback.OnRecordingPaused()
-			case e.OutputState == "OBS_WEBSOCKET_OUTPUT_RESUMED":
-				callback.OnRecordingResumed()
-			}
-
-		case *events.RecordFileChanged:
-			callback.OnRecordingFileChanged(e.NewOutputPath)
-
-		// Streaming events
-		case *events.StreamStateChanged:
-			if e.OutputActive && e.OutputState == "OBS_WEBSOCKET_OUTPUT_STARTED" {
-				callback.OnStreamingStarted()
-			} else if !e.OutputActive && e.OutputState == "OBS_WEBSOCKET_OUTPUT_STOPPED" {
-				callback.OnStreamingStopped()
-			}
-
-		// Virtual camera events
-		case *events.VirtualcamStateChanged:
-			if e.OutputActive && e.OutputState == "OBS_WEBSOCKET_OUTPUT_STARTED" {
-				callback.OnVirtualCamStarted()
-			} else if !e.OutputActive && e.OutputState == "OBS_WEBSOCKET_OUTPUT_STOPPED" {
-				callback.OnVirtualCamStopped()
-			}
-
-		// Replay buffer events
-		case *events.ReplayBufferSaved:
-			callback.OnReplayBufferSaved(e.SavedReplayPath)
-
-		// Input events
-		case *events.InputMuteStateChanged:
-			callback.OnInputMuteChanged(e.InputName, e.InputMuted)
-
-		// Scene item events
-		case *events.SceneItemEnableStateChanged:
-			callback.OnSceneItemVisibilityChanged(e.SceneName, int(e.SceneItemId), e.SceneItemEnabled)
-
-		// Transition events
-		case *events.SceneTransitionStarted:
-			callback.OnTransitionStarted(e.TransitionName)
-
-		// Studio mode events
-		case *events.StudioModeStateChanged:
-			callback.OnStudioModeChanged(e.StudioModeEnabled)
-
-		default:
-			// Ignore other events
+		// Events with no handler are dropped here rather than at the sink. The
+		// subscription mask is deliberately wider than the set translated below
+		// (FB-62), so this is the normal path for filter and vendor events, not
+		// an error.
+		event, ok := eventFrom(raw, time.Now())
+		if !ok {
+			continue
 		}
+
+		sink.HandleEvent(event)
 	}
 }
 
