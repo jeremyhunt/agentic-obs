@@ -71,9 +71,17 @@ type InputReader interface {
 	GetInputPropertiesItems(inputName, propertyName string) ([]AudioDevice, error)
 }
 
+// InputSummary names an input and its kind, which is all a caller needs to
+// decide whether an input it is looking for already exists.
+type InputSummary struct {
+	InputName string
+	InputKind string
+}
+
 // InputConfigurer creates and configures source objects.
 type InputConfigurer interface {
 	CreateInput(sceneName, sourceName, inputKind string, settings map[string]interface{}) (int, error)
+	CreateSceneItem(sceneName, sourceName string, enabled bool) (int, error)
 	CreateBrowserSource(sceneName, sourceName string, settings BrowserSourceSettings) (int, error)
 	CreateAudioInput(sceneName, sourceName, inputKind, deviceID string) (int, error)
 	SetSourceSettings(sourceName string, settings map[string]interface{}, overlay bool) error

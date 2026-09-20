@@ -381,6 +381,55 @@ the kind, not to any one source, so this works without creating anything.
 set_source_settings or create_source, instead of guessing names. Also useful for
 telling a real change from a setting that merely equals its default.`,
 
+	"ensure_input": `# ensure_input
+
+**Category**: Sources
+
+**Description**: Make an input exist in a scene, configured as described,
+whatever state things are in now. This is the create-or-update idiom: the
+create_* tools are create-only and fail on a second run, so re-running a setup
+is safe with this and not with them.
+
+**Input**:
+- scene_name (string, required): Scene the input should appear in
+- source_name (string, required): Name of the input
+- input_kind (string, required): Input kind (see list_input_kinds)
+- settings (object, optional): Settings to apply
+- overlay (bool, optional, default true): Merge settings, or replace them when
+  false
+
+**Output**:
+- action: one of created, placed, updated, unchanged
+- scene_item_id: the placement's ID, so you can position it without a lookup
+- scene_name, source_name, input_kind
+
+**What each action means**:
+- created   -- the input did not exist anywhere
+- placed    -- the input existed in another scene and was added to this one,
+               sharing the same object rather than copying it
+- updated   -- the input was already here and its settings changed
+- unchanged -- nothing needed doing
+
+**Example Input**:
+{
+  "scene_name": "Starting Soon",
+  "source_name": "OVERLAY_NowPlaying",
+  "input_kind": "browser_source",
+  "settings": { "url": "http://localhost:8080/widget.html", "width": 1920, "height": 1080 }
+}
+
+**Use Case**: Re-runnable scene setup. Run it once to build a scene, run it again
+after editing and only what changed is written.
+
+**Note on sharing**: placing an existing input in a second scene adds a
+reference, not a copy. One overlay configured once can appear in several scenes,
+and a later settings change reaches all of them. That is usually what you want;
+when it is not, use a different source_name.
+
+**Refusals**: if the name is taken by an input of a different kind, this fails
+rather than guessing. Silently updating would leave you believing you have a
+browser source when you have a webcam.`,
+
 	"list_input_property_items": `# list_input_property_items
 
 **Category**: Sources

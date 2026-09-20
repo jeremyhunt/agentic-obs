@@ -1005,6 +1005,33 @@ func (c *Client) CreateInput(sceneName, sourceName, inputKind string, settings m
 	return int(resp.SceneItemId), nil
 }
 
+// CreateSceneItem places an input that already exists into a scene.
+//
+// The distinction CreateInput cannot express: an input is a shared object, and
+// putting it in a second scene is adding a reference, not making a copy. Without
+// this, showing one overlay in two scenes meant creating it twice under
+// different names -- two objects to configure, and two to keep in step.
+// OVERLAY_NowPlaying is exactly this case. (FB-71)
+func (c *Client) CreateSceneItem(sceneName, sourceName string, enabled bool) (int, error) {
+	client, err := c.getClient()
+	if err != nil {
+		return 0, err
+	}
+
+	scene, source := sceneName, sourceName
+	resp, err := client.SceneItems.CreateSceneItem(&sceneitems.CreateSceneItemParams{
+		SceneName:        &scene,
+		SourceName:       &source,
+		SceneItemEnabled: &enabled,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to add source '%s' to scene '%s': %w. "+
+			"The scene or the source may not exist", sourceName, sceneName, err)
+	}
+
+	return resp.SceneItemId, nil
+}
+
 // GetSceneItemTransform retrieves the transform properties of a scene item.
 func (c *Client) GetSceneItemTransform(sceneName string, sceneItemID int) (*SceneItemTransform, error) {
 	client, err := c.getClient()

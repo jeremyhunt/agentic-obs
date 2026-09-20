@@ -27,7 +27,7 @@ import "fmt"
 //
 // ============================================================================
 const (
-	HelpToolCount     = 91 // Total MCP tools (including meta-tools)
+	HelpToolCount     = 92 // Total MCP tools (including meta-tools)
 	HelpResourceCount = 4  // Resource types: scenes, screenshots, screenshot-url, presets
 	HelpPromptCount   = 14 // Workflow prompts
 )

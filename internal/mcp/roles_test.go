@@ -70,8 +70,8 @@ func TestOBSClientIsExactlyTheUnionOfRoles(t *testing.T) {
 
 	// A count that only ever moves deliberately. If this is the only failure,
 	// the surface grew or shrank and the rest of the suite agreed -- update it.
-	if len(onInterface) != 82 {
-		t.Errorf("OBSClient exposes %d methods, expected 82", len(onInterface))
+	if len(onInterface) != 83 {
+		t.Errorf("OBSClient exposes %d methods, expected 83", len(onInterface))
 	}
 }
 

@@ -592,8 +592,16 @@ func (s *Server) registerToolHandlers() {
 			s.handleListInputPropertyItems,
 		)
 
-		toolCount += 7
-		log.Println("Source tools registered (7 tools)")
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
+				Name:        "ensure_input",
+				Description: "Make an input exist in a scene with the given settings, creating, placing or updating as needed. Safe to re-run; reports created, placed, updated or unchanged",
+			},
+			s.handleEnsureInput,
+		)
+
+		toolCount += 8
+		log.Println("Source tools registered (8 tools)")
 	}
 
 	// Audio tools
