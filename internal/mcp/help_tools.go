@@ -293,6 +293,115 @@ explicit state the call is idempotent.`,
 
 **Use Case**: Inspect source configuration, useful for debugging or verification.`,
 
+	"set_source_settings": `# set_source_settings
+
+**Category**: Sources
+
+**Description**: Write a source's own settings. This is how you change what a
+source *is* -- a browser source's URL, a text source's text, an image source's
+file -- as opposed to where it sits in a scene.
+
+**Input**:
+- source_name (string, required): Name of source
+- settings (object, required): Settings to apply
+- overlay (bool, optional, default true): Merge into existing settings. Pass
+  false to replace them entirely, which resets every key you do not supply back
+  to its default.
+
+**Output**:
+- source_name: Source that was written
+- overlay: Whether the write merged or replaced
+
+**Example Input**:
+{
+  "source_name": "OVERLAY_NowPlaying",
+  "settings": { "url": "http://localhost:8080/widget.html" }
+}
+
+**Use Case**: Retarget a browser source, change text content, or swap an image
+file. Use get_input_default_settings first if you do not know a kind's keys.
+
+**Caution**: overlay=false is a reset-then-apply. Reach for it when the settings
+you pass are meant to be the complete state -- restoring a saved configuration,
+say -- and leave it alone for single-field edits.`,
+
+	"press_source_properties_button": `# press_source_properties_button
+
+**Category**: Sources
+
+**Description**: Press a button on a source's properties dialog. Some source
+behaviour is reachable only this way, because the button triggers an action
+rather than storing a setting.
+
+**Input**:
+- source_name (string, required): Name of source
+- property_name (string, required): Name of the button property
+
+**Output**:
+- source_name, property_name: What was pressed
+
+**Example Input**:
+{
+  "source_name": "OVERLAY_NowPlaying",
+  "property_name": "refreshnocache"
+}
+
+**Use Case**: "refreshnocache" reloads a browser source and bypasses its cache.
+Prefer it to appending a cache-busting query parameter: pressing the button
+changes no stored settings, whereas rewriting the URL does, and other writers of
+that URL will notice.
+
+**Note**: Buttons are per source kind. Use list_input_property_items or the
+source's properties dialog in OBS to find valid names.`,
+
+	"get_input_default_settings": `# get_input_default_settings
+
+**Category**: Sources
+
+**Description**: Get the default settings for an input kind. Defaults belong to
+the kind, not to any one source, so this works without creating anything.
+
+**Input**:
+- input_kind (string, required): Input kind, e.g. browser_source (see
+  list_input_kinds)
+
+**Output**: Object of default settings for that kind
+
+**Example Input**:
+{
+  "input_kind": "browser_source"
+}
+
+**Use Case**: Discover what settings keys a kind accepts before calling
+set_source_settings or create_source, instead of guessing names. Also useful for
+telling a real change from a setting that merely equals its default.`,
+
+	"list_input_property_items": `# list_input_property_items
+
+**Category**: Sources
+
+**Description**: List the selectable items of a source property -- the contents
+of a dropdown in the properties dialog.
+
+**Input**:
+- source_name (string, required): Name of source
+- property_name (string, required): Name of the property to enumerate
+
+**Output**:
+- items: Array of {name, value} pairs; name is the label shown in OBS, value is
+  what set_source_settings expects
+- count: Number of items
+
+**Example Input**:
+{
+  "source_name": "Window Capture",
+  "property_name": "window"
+}
+
+**Use Case**: Find the available windows for a window_capture, monitors for a
+monitor_capture, or devices for an audio input. The value, not the display name,
+is what you write back with set_source_settings.`,
+
 	// Audio
 	"get_input_mute": `# get_input_mute
 

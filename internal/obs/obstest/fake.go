@@ -446,3 +446,61 @@ func (f *Fake) DuplicateSceneItem(sceneName string, sceneItemID int, destScene s
 
 	return copied.id, nil
 }
+
+// kindDefaults are the default settings the fake reports per input kind.
+//
+// Real OBS gets these from the source type's own defaults callback, so the fake
+// can only approximate. It carries the kinds the contract uses; an unknown kind
+// reports an error rather than an empty map, because "this kind has no settings"
+// and "I have never heard of this kind" are different answers and OBS
+// distinguishes them.
+var kindDefaults = map[string]map[string]interface{}{
+	"color_source_v3": {"color": 4278190080.0, "width": 0.0, "height": 0.0},
+}
+
+func (f *Fake) GetSourceSettings(sourceName string) (map[string]interface{}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	in, ok := f.world.inputs[sourceName]
+	if !ok {
+		return nil, fmt.Errorf("source %q not found", sourceName)
+	}
+	return copySettings(in.settings), nil
+}
+
+// SetSourceSettings merges when overlay is true and replaces when it is false.
+//
+// obs_source_reset_settings clears the data object before applying, so a key
+// left out of a replacing write goes back to its default rather than keeping the
+// value it had -- which is why the defaults are merged in here rather than the
+// map simply being emptied.
+func (f *Fake) SetSourceSettings(sourceName string, settings map[string]interface{}, overlay bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	in, ok := f.world.inputs[sourceName]
+	if !ok {
+		return fmt.Errorf("source %q not found", sourceName)
+	}
+
+	if !overlay {
+		in.settings = copySettings(kindDefaults[in.kind])
+	}
+	if in.settings == nil {
+		in.settings = map[string]interface{}{}
+	}
+	for k, v := range settings {
+		in.settings[k] = v
+	}
+	return nil
+}
+
+func (f *Fake) GetInputDefaultSettings(inputKind string) (map[string]interface{}, error) {
+	defaults, ok := kindDefaults[inputKind]
+	if !ok {
+		return nil, fmt.Errorf("no such input kind %q", inputKind)
+	}
+	// A copy, so a caller cannot edit the defaults every other caller reads.
+	return copySettings(defaults), nil
+}

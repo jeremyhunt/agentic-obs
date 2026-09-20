@@ -65,16 +65,19 @@ type SceneItemWriter interface {
 type InputReader interface {
 	ListSources() ([]*typedefs.Input, error)
 	GetSourceSettings(sourceName string) (map[string]interface{}, error)
+	GetInputDefaultSettings(inputKind string) (map[string]interface{}, error)
 	GetInputKindList() ([]string, error)
 	GetSpecialInputs() (*SpecialInputs, error)
 	GetInputPropertiesItems(inputName, propertyName string) ([]AudioDevice, error)
 }
 
-// InputConfigurer creates source objects.
+// InputConfigurer creates and configures source objects.
 type InputConfigurer interface {
 	CreateInput(sceneName, sourceName, inputKind string, settings map[string]interface{}) (int, error)
 	CreateBrowserSource(sceneName, sourceName string, settings BrowserSourceSettings) (int, error)
 	CreateAudioInput(sceneName, sourceName, inputKind, deviceID string) (int, error)
+	SetSourceSettings(sourceName string, settings map[string]interface{}, overlay bool) error
+	PressInputPropertiesButton(sourceName, propertyName string) error
 }
 
 // AudioController covers mute and volume on an input.

@@ -109,7 +109,7 @@ Comprehensive documentation for all 81 Model Context Protocol (MCP) tools provid
 
 ## Overview
 
-The agentic-obs MCP server provides 87 tools organized into 15 categories (9 tool groups + 4 meta-tools) for comprehensive OBS Studio control. All tools communicate with OBS via WebSocket (default port 4455) and return structured JSON responses.
+The agentic-obs MCP server provides 91 tools organized into 15 categories (9 tool groups + 4 meta-tools) for comprehensive OBS Studio control. All tools communicate with OBS via WebSocket (default port 4455) and return structured JSON responses.
 
 | Category | Tools | Description | Tool Group |
 |----------|-------|-------------|------------|
@@ -1157,6 +1157,143 @@ Scene presets allow you to save and restore the visibility state of all sources 
 - "Get the settings for the 'Game Capture' source"
 - "What device is my microphone using?"
 - "Display source settings for 'Browser Source'"
+
+### set_source_settings
+
+**Purpose:** Write a source's own settings -- what the source *is* (a browser source's URL, a text source's text, an image source's file), as distinct from where it sits in a scene.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| source_name | string | Yes | Exact name of the source |
+| settings | object | Yes | Settings to apply |
+| overlay | boolean | No | Merge into existing settings (default `true`). `false` replaces them entirely |
+
+**Return Value Schema:**
+```json
+{
+  "source_name": "OVERLAY_NowPlaying",
+  "overlay": true,
+  "message": "Settings applied to 'OVERLAY_NowPlaying'"
+}
+```
+
+**Overlay semantics:**
+- `true` (default) merges: keys you supply are updated, everything else is left alone.
+- `false` resets the source to its kind's defaults and *then* applies your settings, so any key you omit reverts to its default.
+
+Use `false` only when the settings you pass are meant to be the complete state -- restoring a saved configuration, for instance. For a single-field edit, leave it alone.
+
+**Use Cases:**
+- Retarget a browser source at a new URL
+- Change the text of a text source
+- Swap the file behind an image or media source
+- Restore a source's full configuration from a saved copy
+
+**Example Natural Language Prompts:**
+- "Point the NowPlaying overlay at localhost:8080"
+- "Change the Starting Soon text to 'Back in 5'"
+- "Swap the background image to bg-night.png"
+
+---
+
+### press_source_properties_button
+
+**Purpose:** Press a button on a source's properties dialog. Some source behaviour is reachable only this way, because the button triggers an action rather than storing a setting.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| source_name | string | Yes | Exact name of the source |
+| property_name | string | Yes | Name of the button property |
+
+**Return Value Schema:**
+```json
+{
+  "source_name": "OVERLAY_NowPlaying",
+  "property_name": "refreshnocache",
+  "message": "Pressed 'refreshnocache' on 'OVERLAY_NowPlaying'"
+}
+```
+
+**Use Cases:**
+- Reload a browser source bypassing its cache (`refreshnocache`)
+- Trigger a source-specific action exposed only as a button
+
+**Why prefer this to a cache-busting URL:** pressing the button changes no stored settings. Appending a query parameter rewrites the URL, which other writers of that URL will notice -- and in this workspace the Starting Soon overlay has two writers.
+
+**Example Natural Language Prompts:**
+- "Reload the NowPlaying overlay"
+- "Refresh the browser source without caching"
+
+---
+
+### get_input_default_settings
+
+**Purpose:** Get the default settings for an input kind. Defaults belong to the kind rather than to any one source, so this works without creating anything.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| input_kind | string | Yes | Input kind, e.g. `browser_source` (see `list_input_kinds`) |
+
+**Return Value Schema:**
+```json
+{
+  "url": "https://obsproject.com/browser-source",
+  "width": 800,
+  "height": 600,
+  "css": ""
+}
+```
+(Schema varies by input kind)
+
+**Use Cases:**
+- Discover which settings keys a kind accepts, instead of guessing names
+- Tell a deliberate setting apart from one that merely equals its default
+- Build a correct `settings` object before calling `create_source` or `set_source_settings`
+
+**Example Natural Language Prompts:**
+- "What settings does a browser source take?"
+- "Show me the defaults for a colour source"
+
+---
+
+### list_input_property_items
+
+**Purpose:** List the selectable items of a source property -- the contents of a dropdown in the properties dialog.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| source_name | string | Yes | Exact name of the source |
+| property_name | string | Yes | Property to enumerate |
+
+**Return Value Schema:**
+```json
+{
+  "source_name": "Window Capture",
+  "property_name": "window",
+  "items": [
+    { "name": "[obs64.exe]: OBS 32.2.2", "value": "OBS...:obs64.exe" }
+  ],
+  "count": 1
+}
+```
+
+**Return Fields:**
+- `items[].name` -- the label OBS shows
+- `items[].value` -- what `set_source_settings` expects; write this, not the label
+- `count` -- number of items
+
+**Use Cases:**
+- Find the windows available to a `window_capture`
+- Find the monitors available to a `monitor_capture`
+- Enumerate audio devices for an input
+
+**Example Natural Language Prompts:**
+- "Which windows can I capture?"
+- "List the audio devices for my microphone"
 
 **Error Scenarios:**
 - Source doesn't exist: "failed to get settings for source 'InvalidName': Source may not exist"

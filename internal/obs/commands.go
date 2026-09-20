@@ -359,6 +359,83 @@ func (c *Client) GetSourceSettings(sourceName string) (map[string]interface{}, e
 	return resp.InputSettings, nil
 }
 
+// SetSourceSettings writes a source's own settings.
+//
+// overlay=true merges into what is already there; overlay=false resets the input
+// to its kind's defaults and then applies, so any key left out reverts rather
+// than persisting. Use false when the caller intends the settings to *be* the
+// given map -- applying a stored scene spec, for one -- and true for a
+// single-field change.
+//
+// This is the request every OBS script in the workspace reaches past
+// agentic-obs to make. (FB-67)
+func (c *Client) SetSourceSettings(sourceName string, settings map[string]interface{}, overlay bool) error {
+	client, err := c.getClient()
+	if err != nil {
+		return err
+	}
+
+	inputName := sourceName
+	_, err = client.Inputs.SetInputSettings(&inputs.SetInputSettingsParams{
+		InputName:     &inputName,
+		InputSettings: settings,
+		Overlay:       &overlay,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set settings for source '%s': %w. Source may not exist", sourceName, err)
+	}
+
+	return nil
+}
+
+// GetInputDefaultSettings reports the default settings for an input kind.
+//
+// Two uses. It is how a caller discovers what an unfamiliar kind can be
+// configured with, without guessing key names; and it is what stops a diff
+// reporting drift for a setting that merely equals its default.
+func (c *Client) GetInputDefaultSettings(inputKind string) (map[string]interface{}, error) {
+	client, err := c.getClient()
+	if err != nil {
+		return nil, err
+	}
+
+	kind := inputKind
+	resp, err := client.Inputs.GetInputDefaultSettings(&inputs.GetInputDefaultSettingsParams{
+		InputKind: &kind,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default settings for input kind '%s': %w. "+
+			"Check the kind against list_input_kinds", inputKind, err)
+	}
+
+	return resp.DefaultInputSettings, nil
+}
+
+// PressInputPropertiesButton presses a button on a source's properties dialog.
+//
+// Some source behaviour is reachable only this way: a browser source's cache-
+// busting reload is the button "refreshnocache", and pressing it mutates no
+// stored settings, which is why it is preferable to the cache-buster URL trick
+// scripts otherwise resort to.
+func (c *Client) PressInputPropertiesButton(sourceName, propertyName string) error {
+	client, err := c.getClient()
+	if err != nil {
+		return err
+	}
+
+	inputName, property := sourceName, propertyName
+	_, err = client.Inputs.PressInputPropertiesButton(&inputs.PressInputPropertiesButtonParams{
+		InputName:    &inputName,
+		PropertyName: &property,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to press button '%s' on source '%s': %w. "+
+			"The source may not exist, or may have no such button property", propertyName, sourceName, err)
+	}
+
+	return nil
+}
+
 // SetSceneItemEnabled sets a scene item's visibility to an explicit state.
 //
 // Prefer this over ToggleSourceVisibility whenever the caller knows the state it

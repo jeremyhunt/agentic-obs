@@ -46,7 +46,11 @@ var toolGroupMetadata = map[string]*ToolGroupMetadata{
 	"Sources": {
 		Name:        "Sources",
 		Description: "Source management: listing sources, visibility control, and settings",
-		ToolNames:   []string{"list_sources", "toggle_source_visibility", "get_source_settings"},
+		ToolNames: []string{
+			"list_sources", "toggle_source_visibility", "get_source_settings",
+			"set_source_settings", "press_source_properties_button",
+			"get_input_default_settings", "list_input_property_items",
+		},
 	},
 	"Audio": {
 		Name:        "Audio",
