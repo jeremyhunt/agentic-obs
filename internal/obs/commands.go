@@ -655,23 +655,45 @@ type BrowserSourceSettings struct {
 }
 
 // SceneItemTransform represents the transform properties of a scene item.
+// SceneItemTransform is a scene item's placement within its scene.
+//
+// Every settable field obs-websocket accepts must appear here. goobs marshals
+// typedefs.SceneItemTransform with no omitempty, and obs-websocket applies any
+// transform key present in the request, so a field missing from this struct is
+// not "left alone" on a write -- it is sent as its zero value and applied.
+// Alignment was missing until FB-54, which meant every set_source_transform,
+// set_source_crop and set_source_bounds call sent alignment=0 (OBS_ALIGN_CENTER)
+// and silently re-anchored any item still on the libobs default of
+// OBS_ALIGN_TOP|OBS_ALIGN_LEFT (5), shifting it by half its rendered size.
+//
+// Width, Height, SourceWidth and SourceHeight are derived by OBS and read-only;
+// they are populated on read for diffing and are never sent on a write.
 type SceneItemTransform struct {
-	PositionX    float64 `json:"position_x"`
-	PositionY    float64 `json:"position_y"`
-	ScaleX       float64 `json:"scale_x"`
-	ScaleY       float64 `json:"scale_y"`
-	Rotation     float64 `json:"rotation"`
+	PositionX float64 `json:"position_x"`
+	PositionY float64 `json:"position_y"`
+	ScaleX    float64 `json:"scale_x"`
+	ScaleY    float64 `json:"scale_y"`
+	Rotation  float64 `json:"rotation"`
+
+	// Alignment is an OBS_ALIGN_* bitmask: 0 centre, 1 left, 2 right, 4 top,
+	// 8 bottom. New scene items default to 5 (top|left).
+	Alignment       int     `json:"alignment"`
+	BoundsType      string  `json:"bounds_type"`
+	BoundsAlignment int     `json:"bounds_alignment"`
+	BoundsWidth     float64 `json:"bounds_width"`
+	BoundsHeight    float64 `json:"bounds_height"`
+	CropToBounds    bool    `json:"crop_to_bounds"`
+
+	CropTop    int `json:"crop_top"`
+	CropBottom int `json:"crop_bottom"`
+	CropLeft   int `json:"crop_left"`
+	CropRight  int `json:"crop_right"`
+
+	// Derived by OBS; read-only.
 	Width        float64 `json:"width"`
 	Height       float64 `json:"height"`
 	SourceWidth  float64 `json:"source_width"`
 	SourceHeight float64 `json:"source_height"`
-	BoundsType   string  `json:"bounds_type"`
-	BoundsWidth  float64 `json:"bounds_width"`
-	BoundsHeight float64 `json:"bounds_height"`
-	CropTop      int     `json:"crop_top"`
-	CropBottom   int     `json:"crop_bottom"`
-	CropLeft     int     `json:"crop_left"`
-	CropRight    int     `json:"crop_right"`
 }
 
 // CreateBrowserSource creates a new browser source in the specified scene.
@@ -753,26 +775,56 @@ func (c *Client) GetSceneItemTransform(sceneName string, sceneItemID int) (*Scen
 
 	t := resp.SceneItemTransform
 	return &SceneItemTransform{
-		PositionX:    t.PositionX,
-		PositionY:    t.PositionY,
-		ScaleX:       t.ScaleX,
-		ScaleY:       t.ScaleY,
-		Rotation:     t.Rotation,
-		Width:        t.Width,
-		Height:       t.Height,
-		SourceWidth:  t.SourceWidth,
-		SourceHeight: t.SourceHeight,
-		BoundsType:   t.BoundsType,
-		BoundsWidth:  t.BoundsWidth,
-		BoundsHeight: t.BoundsHeight,
-		CropTop:      int(t.CropTop),
-		CropBottom:   int(t.CropBottom),
-		CropLeft:     int(t.CropLeft),
-		CropRight:    int(t.CropRight),
+		PositionX:       t.PositionX,
+		PositionY:       t.PositionY,
+		ScaleX:          t.ScaleX,
+		ScaleY:          t.ScaleY,
+		Rotation:        t.Rotation,
+		Width:           t.Width,
+		Height:          t.Height,
+		SourceWidth:     t.SourceWidth,
+		SourceHeight:    t.SourceHeight,
+		Alignment:       int(t.Alignment),
+		BoundsType:      t.BoundsType,
+		BoundsAlignment: int(t.BoundsAlignment),
+		BoundsWidth:     t.BoundsWidth,
+		BoundsHeight:    t.BoundsHeight,
+		CropToBounds:    t.CropToBounds,
+		CropTop:         int(t.CropTop),
+		CropBottom:      int(t.CropBottom),
+		CropLeft:        int(t.CropLeft),
+		CropRight:       int(t.CropRight),
 	}, nil
 }
 
 // SetSceneItemTransform sets the transform properties of a scene item.
+// toGoobsTransform converts our transform into the wire type.
+//
+// Width, Height, SourceWidth and SourceHeight are deliberately omitted: OBS
+// derives them and ignores them on a write. Every other field must be set,
+// because goobs marshals this struct with no omitempty and obs-websocket applies
+// any key present -- so a field left at its zero value here is transmitted and
+// applied, not skipped. (FB-54)
+func toGoobsTransform(transform *SceneItemTransform) *typedefs.SceneItemTransform {
+	return &typedefs.SceneItemTransform{
+		PositionX:       transform.PositionX,
+		PositionY:       transform.PositionY,
+		ScaleX:          transform.ScaleX,
+		ScaleY:          transform.ScaleY,
+		Rotation:        transform.Rotation,
+		Alignment:       float64(transform.Alignment),
+		BoundsType:      transform.BoundsType,
+		BoundsAlignment: float64(transform.BoundsAlignment),
+		BoundsWidth:     transform.BoundsWidth,
+		BoundsHeight:    transform.BoundsHeight,
+		CropToBounds:    transform.CropToBounds,
+		CropTop:         float64(transform.CropTop),
+		CropBottom:      float64(transform.CropBottom),
+		CropLeft:        float64(transform.CropLeft),
+		CropRight:       float64(transform.CropRight),
+	}
+}
+
 func (c *Client) SetSceneItemTransform(sceneName string, sceneItemID int, transform *SceneItemTransform) error {
 	client, err := c.getClient()
 	if err != nil {
@@ -780,20 +832,7 @@ func (c *Client) SetSceneItemTransform(sceneName string, sceneItemID int, transf
 	}
 
 	// Build transform struct
-	t := &typedefs.SceneItemTransform{
-		PositionX:    transform.PositionX,
-		PositionY:    transform.PositionY,
-		ScaleX:       transform.ScaleX,
-		ScaleY:       transform.ScaleY,
-		Rotation:     transform.Rotation,
-		BoundsType:   transform.BoundsType,
-		BoundsWidth:  transform.BoundsWidth,
-		BoundsHeight: transform.BoundsHeight,
-		CropTop:      float64(transform.CropTop),
-		CropBottom:   float64(transform.CropBottom),
-		CropLeft:     float64(transform.CropLeft),
-		CropRight:    float64(transform.CropRight),
-	}
+	t := toGoobsTransform(transform)
 
 	_, err = client.SceneItems.SetSceneItemTransform(&sceneitems.SetSceneItemTransformParams{
 		SceneName:          &sceneName,
