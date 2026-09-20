@@ -418,54 +418,30 @@ func TestConvertToStorageConfig(t *testing.T) {
 
 // Test tool group metadata
 
+// TestToolGroupMetadata checks that representative tools are filed under the
+// right group. Group sizes are deliberately not asserted here: a group's size is
+// len(ToolNames), and TestRegisteredToolsMatchMetadata checks the whole set
+// against what the server actually serves. (FB-52)
 func TestToolGroupMetadata(t *testing.T) {
-	expectedGroups := map[string]struct {
-		toolCount int
-		hasTools  []string
-	}{
-		"Core": {
-			toolCount: 25,
-			hasTools:  []string{"list_scenes", "start_recording", "toggle_virtual_cam", "toggle_studio_mode"},
-		},
-		"Sources": {
-			toolCount: 3,
-			hasTools:  []string{"list_sources", "toggle_source_visibility"},
-		},
-		"Audio": {
-			toolCount: 4,
-			hasTools:  []string{"toggle_input_mute", "set_input_volume"},
-		},
-		"Layout": {
-			toolCount: 6,
-			hasTools:  []string{"save_scene_preset", "apply_scene_preset"},
-		},
-		"Visual": {
-			toolCount: 4,
-			hasTools:  []string{"create_screenshot_source", "list_screenshot_sources"},
-		},
-		"Design": {
-			toolCount: 14,
-			hasTools:  []string{"create_text_source", "set_source_transform"},
-		},
-		"Filters": {
-			toolCount: 7,
-			hasTools:  []string{"list_source_filters", "toggle_source_filter"},
-		},
-		"Transitions": {
-			toolCount: 5,
-			hasTools:  []string{"list_transitions", "set_current_transition"},
-		},
+	expectedMembers := map[string][]string{
+		"Core":        {"list_scenes", "start_recording", "toggle_virtual_cam", "toggle_studio_mode"},
+		"Sources":     {"list_sources", "toggle_source_visibility"},
+		"Audio":       {"toggle_input_mute", "set_input_volume"},
+		"Layout":      {"save_scene_preset", "apply_scene_preset"},
+		"Visual":      {"create_screenshot_source", "list_screenshot_sources"},
+		"Design":      {"create_text_source", "set_source_transform"},
+		"Filters":     {"list_source_filters", "toggle_source_filter"},
+		"Transitions": {"list_transitions", "set_current_transition"},
+		"Automation":  {"list_automation_rules", "create_automation_rule"},
 	}
 
-	for groupName, expected := range expectedGroups {
+	for groupName, members := range expectedMembers {
 		t.Run(groupName, func(t *testing.T) {
 			meta := toolGroupMetadata[groupName]
 			require.NotNil(t, meta, "metadata should exist for %s", groupName)
+			assert.Equal(t, len(meta.ToolNames), meta.Count(), "Count() must be len(ToolNames)")
 
-			assert.Equal(t, expected.toolCount, meta.ToolCount, "tool count mismatch")
-			assert.Len(t, meta.ToolNames, expected.toolCount, "tool names should match count")
-
-			for _, expectedTool := range expected.hasTools {
+			for _, expectedTool := range members {
 				assert.Contains(t, meta.ToolNames, expectedTool, "should include %s", expectedTool)
 			}
 		})
@@ -478,21 +454,6 @@ func TestMetaToolNames(t *testing.T) {
 	assert.Contains(t, MetaToolNames, "get_tool_config")
 	assert.Contains(t, MetaToolNames, "set_tool_config")
 	assert.Contains(t, MetaToolNames, "list_tool_groups")
-}
-
-// TestToolCountConsistency ensures ToolCount field matches len(ToolNames) for all groups.
-// This catches accidental desync when adding/removing tools from a group.
-func TestToolCountConsistency(t *testing.T) {
-	for _, groupName := range ToolGroupOrder {
-		t.Run(groupName, func(t *testing.T) {
-			meta := toolGroupMetadata[groupName]
-			require.NotNil(t, meta, "metadata should exist for %s", groupName)
-
-			assert.Equal(t, meta.ToolCount, len(meta.ToolNames),
-				"ToolCount (%d) must match len(ToolNames) (%d) for group %s",
-				meta.ToolCount, len(meta.ToolNames), groupName)
-		})
-	}
 }
 
 // TestToolGroupOrderConsistency ensures ToolGroupOrder matches toolGroupMetadata keys.
@@ -520,25 +481,23 @@ func TestToolGroupOrderConsistency(t *testing.T) {
 		"ToolGroupOrder and toolGroupMetadata should have same number of entries")
 }
 
-// TestTotalToolCountMatchesDocumentation validates that tool counts in metadata
-// sum to the documented total (81 tools = 77 group tools + 4 meta-tools).
-// This catches drift between code and documentation.
-func TestTotalToolCountMatchesDocumentation(t *testing.T) {
-	// Sum all tool counts from metadata
+// TestTotalToolCountMatchesMetadata checks the documented total against the sum
+// of the groups. It deliberately does not hardcode a number: the previous
+// version asserted against a literal 81, so it could only ever confirm that two
+// hand-typed copies agreed with each other. The registry test
+// (TestHelpToolCountMatchesRegisteredTools) ties HelpToolCount to the tools the
+// server actually serves. (FB-52)
+func TestTotalToolCountMatchesMetadata(t *testing.T) {
 	var groupToolCount int
 	for _, meta := range toolGroupMetadata {
-		groupToolCount += meta.ToolCount
+		groupToolCount += meta.Count()
 	}
 
-	// Add meta-tools
 	totalTools := groupToolCount + len(MetaToolNames)
 
-	// Expected total from documentation (CLAUDE.md, README.md, verify-docs.sh)
-	const expectedTotal = 81
-
-	assert.Equal(t, expectedTotal, totalTools,
-		"Total tool count (%d group tools + %d meta-tools = %d) should match documented %d",
-		groupToolCount, len(MetaToolNames), totalTools, expectedTotal)
+	assert.Equal(t, HelpToolCount, totalTools,
+		"HelpToolCount (%d) must equal %d group tools + %d meta-tools = %d",
+		HelpToolCount, groupToolCount, len(MetaToolNames), totalTools)
 }
 
 // TestToolNamesAreUnique ensures no duplicate tool names exist across groups.

@@ -30,6 +30,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`delete_automation_rule` elicitation safety** — when the elicitation RPC itself errors, the handler now returns that error instead of silently falling through and deleting without user confirmation.
 
 ### Changed
+- **Tool counts derive from the registration metadata (FB-52)** — a group's size
+  is now `len(ToolNames)` and nothing else. The stored `ToolCount` field, the nine
+  per-group `Help*ToolCount` constants, and the hardcoded expectation tables in
+  `tool_config_test.go` are gone. `HelpToolCount` remains the one hand-written
+  total, because `verify-docs.sh` reads it as the documented figure, and two new
+  tests keep it honest.
+- **Tool registration is verified against the served tool list (FB-52)** —
+  `TestRegisteredToolsMatchMetadata` connects an in-memory MCP client, calls
+  `ListTools`, and compares the result to `toolGroupMetadata` plus
+  `MetaToolNames`. `TestToolGroupGatingIsReal` disables each group in turn and
+  asserts exactly that group's tools disappear, which is the first end-to-end
+  check of the gating ADR-004 describes. Previously the only tests compared one
+  hand-typed number to another, which is why 81/83/85 could all coexist.
 - **Documentation consistency now runs in Go CI (FB-52)** — tool counts and help
   entries live in Go source, so a Go-only change could break them without
   triggering the markdown-only `docs-check` workflow. `go.yml` now runs
