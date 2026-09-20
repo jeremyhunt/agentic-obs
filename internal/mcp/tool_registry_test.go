@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"github.com/ironystock/agentic-obs/internal/mcp/testutil"
@@ -107,8 +108,48 @@ func TestRegisteredToolsMatchMetadata(t *testing.T) {
 	served := servedToolNames(t, s)
 	declared := declaredToolNames(DefaultToolGroupConfig())
 
-	assert.ElementsMatch(t, declared, served,
-		"tools served over MCP must match toolGroupMetadata + MetaToolNames")
+	assertSameToolSets(t, declared, served)
+}
+
+// assertSameToolSets reports the symmetric difference between two tool lists.
+// testify's ElementsMatch dumps both lists in full, which for an 83-tool surface
+// buries the two names that actually differ. (FB-52)
+func assertSameToolSets(t *testing.T, declared, served []string) {
+	t.Helper()
+
+	inDeclared := make(map[string]bool, len(declared))
+	for _, n := range declared {
+		inDeclared[n] = true
+	}
+	inServed := make(map[string]bool, len(served))
+	for _, n := range served {
+		inServed[n] = true
+	}
+
+	var registeredNotDeclared, declaredNotRegistered []string
+	for _, n := range served {
+		if !inDeclared[n] {
+			registeredNotDeclared = append(registeredNotDeclared, n)
+		}
+	}
+	for _, n := range declared {
+		if !inServed[n] {
+			declaredNotRegistered = append(declaredNotRegistered, n)
+		}
+	}
+	sort.Strings(registeredNotDeclared)
+	sort.Strings(declaredNotRegistered)
+
+	assert.Empty(t, registeredNotDeclared,
+		"registered with mcpsdk.AddTool but missing from toolGroupMetadata ToolNames "+
+			"(add them in internal/mcp/tool_config.go): %v", registeredNotDeclared)
+	assert.Empty(t, declaredNotRegistered,
+		"declared in toolGroupMetadata but never registered "+
+			"(add the mcpsdk.AddTool call in internal/mcp/tools.go, or remove the name): %v",
+		declaredNotRegistered)
+
+	// Duplicate registrations would otherwise hide inside a set comparison.
+	assert.Equal(t, len(inServed), len(served), "a tool was registered more than once")
 }
 
 // TestHelpToolCountMatchesRegisteredTools ties the documented total to reality.
