@@ -106,3 +106,50 @@ func structFieldNames(v any) []string {
 	}
 	return names
 }
+
+// TestReadTransformCarriesEverySettableField covers the other half of FB-54.
+//
+// The write path had a test; the read path did not. A conversion that drops a
+// field on the way back from OBS is just as damaging, because every transform
+// tool is read-modify-write: a field lost on read is then written back as zero.
+// That is the same corruption, arriving by the other door.
+func TestReadTransformCarriesEverySettableField(t *testing.T) {
+	from := &typedefs.SceneItemTransform{
+		PositionX: 10, PositionY: 20,
+		ScaleX: 1.5, ScaleY: 2.5,
+		Rotation:        90,
+		Alignment:       5,
+		BoundsType:      "OBS_BOUNDS_SCALE_INNER",
+		BoundsAlignment: 4,
+		BoundsWidth:     640, BoundsHeight: 480,
+		CropToBounds: true,
+		CropTop:      1, CropBottom: 2, CropLeft: 3, CropRight: 4,
+		// Derived by OBS; these must survive the read, since capture and diff
+		// rely on them even though they are never written back.
+		Width: 1920, Height: 1080, SourceWidth: 3840, SourceHeight: 2160,
+	}
+
+	got := fromGoobsTransform(from)
+
+	if got.Alignment != 5 {
+		t.Errorf("Alignment = %v, want 5: a zero read back is written back, re-anchoring the item", got.Alignment)
+	}
+	if got.BoundsAlignment != 4 {
+		t.Errorf("BoundsAlignment = %v, want 4", got.BoundsAlignment)
+	}
+	if !got.CropToBounds {
+		t.Error("CropToBounds = false, want true")
+	}
+	if got.PositionX != 10 || got.ScaleY != 2.5 || got.Rotation != 90 {
+		t.Errorf("basic fields not carried: %+v", got)
+	}
+	if got.CropTop != 1 || got.CropRight != 4 {
+		t.Errorf("crop not carried: %+v", got)
+	}
+	if got.BoundsType != "OBS_BOUNDS_SCALE_INNER" {
+		t.Errorf("BoundsType = %q", got.BoundsType)
+	}
+	if got.Width != 1920 || got.SourceHeight != 2160 {
+		t.Errorf("derived fields must survive the read for capture and diff: %+v", got)
+	}
+}

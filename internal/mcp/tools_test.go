@@ -2803,3 +2803,47 @@ func TestToggleSourceVisibilityExplicitState(t *testing.T) {
 			"with no explicit state the tool must keep its original toggle behaviour")
 	})
 }
+
+// TestSetSourceBoundsPreservesAlignment completes the FB-54 coverage.
+//
+// Three tools are read-modify-write over the transform -- set_source_transform,
+// set_source_crop and set_source_bounds. The first two got tests; bounds did
+// not, purely because it was the one I forgot. Writing the tests first would
+// have enumerated all three from the handler list rather than from memory. (FB-59)
+func TestSetSourceBoundsPreservesAlignment(t *testing.T) {
+	server, mock := testServer(t)
+
+	before, err := mock.GetSceneItemTransform("Scene 1", 1)
+	require.NoError(t, err)
+	require.Equal(t, 5, before.Alignment, "fixture should start at OBS's default alignment")
+
+	_, _, err = server.handleSetSourceBounds(context.Background(), nil, SetSourceBoundsInput{
+		SceneName:    "Scene 1",
+		SceneItemID:  1,
+		BoundsType:   "OBS_BOUNDS_SCALE_INNER",
+		BoundsWidth:  640,
+		BoundsHeight: 480,
+	})
+	require.NoError(t, err)
+
+	after, err := mock.GetSceneItemTransform("Scene 1", 1)
+	require.NoError(t, err)
+	assert.Equal(t, "OBS_BOUNDS_SCALE_INNER", after.BoundsType, "the requested change should apply")
+	assert.Equal(t, 640.0, after.BoundsWidth)
+	assert.Equal(t, 5, after.Alignment, "set_source_bounds must not re-anchor the item")
+}
+
+// TestSetSourceVisibilityPropagatesOBSErrors exercises ErrorOnSetSceneItemEnabled,
+// which FB-55 added to the mock and never used. An error-injection field with no
+// test is coverage theatre: it looks like the failure path is handled.
+func TestSetSourceVisibilityPropagatesOBSErrors(t *testing.T) {
+	server, mock := testServer(t)
+	mock.ErrorOnSetSceneItemEnabled = errors.New("OBS said no")
+
+	want := true
+	_, _, err := server.handleToggleSourceVisibility(context.Background(), nil,
+		SourceVisibilityInput{SceneName: "Scene 1", SourceID: 1, Visible: &want})
+
+	require.Error(t, err, "an OBS failure must reach the caller, not be swallowed")
+	assert.Contains(t, err.Error(), "OBS said no")
+}

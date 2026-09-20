@@ -168,3 +168,42 @@ func TestVisibilityEventNotifiesSubscribedScene(t *testing.T) {
 		t.Fatal("no notification for a visibility change in a subscribed scene")
 	}
 }
+
+// TestSubscribeRejectsURIsThatNeverEmit covers the handleSubscribe guard, which
+// was written in FB-57 with no test at all.
+//
+// Writing the test first would have caught that the guard did not do what its
+// own comment claimed. It said it rejected "URIs we will never notify about",
+// but it only checked the obs:// prefix -- so obs://screenshot/x and
+// obs://preset/x were accepted, and a client subscribing to either waits
+// forever. Only obs://scene/{name} ever emits, because ShouldTriggerResourceUpdated
+// maps scene and visibility events and nothing else. (FB-59)
+func TestSubscribeRejectsURIsThatNeverEmit(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		uri       string
+		wantError bool
+	}{
+		{"scene resource emits, so it is accepted", "obs://scene/Scene 1", false},
+		{"a non-obs scheme is rejected", "file:///etc/passwd", true},
+		{"http is rejected", "https://example.com", true},
+		{"screenshot never emits an update, so subscribing is a silent wait", "obs://screenshot/Webcam", true},
+		{"preset never emits an update either", "obs://preset/my-preset", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, session, _ := connectedPair(t)
+
+			err := session.Subscribe(ctx, &mcpsdk.SubscribeParams{URI: tt.uri})
+
+			if tt.wantError {
+				require.Error(t, err, "subscribing to %s should be refused rather than silently never delivering", tt.uri)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}

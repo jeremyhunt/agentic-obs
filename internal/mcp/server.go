@@ -432,6 +432,10 @@ func (s *Server) recordAction(toolName, action string, input interface{}, output
 	}
 }
 
+// subscribableURIPrefix is the only resource family that emits updates. Kept
+// beside handleSubscribe so the guard and the reason for it stay together.
+const subscribableURIPrefix = "obs://scene/"
+
 // handleSubscribe accepts a client's request to receive notifications for a
 // resource URI. The SDK tracks the subscriber set itself; this hook exists so the
 // capability is advertised and so we can reject URIs we will never notify about,
@@ -439,8 +443,13 @@ func (s *Server) recordAction(toolName, action string, input interface{}, output
 func (s *Server) handleSubscribe(ctx context.Context, req *mcpsdk.SubscribeRequest) error {
 	uri := req.Params.URI
 
-	if !strings.HasPrefix(uri, "obs://") {
-		return fmt.Errorf("cannot subscribe to %q: only obs:// resources emit updates", uri)
+	// Only scene resources ever emit an update: ShouldTriggerResourceUpdated maps
+	// scene and visibility events and nothing else. Accepting a subscription to
+	// obs://screenshot/... or obs://preset/... would leave the client waiting on
+	// a notification that is never sent, which is worse than a clear refusal.
+	if !strings.HasPrefix(uri, subscribableURIPrefix) {
+		return fmt.Errorf(
+			"cannot subscribe to %q: only %s... resources emit updates", uri, subscribableURIPrefix)
 	}
 
 	log.Printf("Client subscribed to resource: %s", uri)
