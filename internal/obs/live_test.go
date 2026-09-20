@@ -59,9 +59,25 @@ func envOr(key, fallback string) string {
 // fake's copy passes, the fake is telling the truth about the behaviour the
 // contract covers.
 func TestLiveClientSatisfiesContract(t *testing.T) {
-	obstest.RunContract(t, func(t *testing.T) (obstest.ContractClient, obstest.Fixture) {
-		client := liveClient(t)
+	// One connection for the whole run, not one per row.
+	//
+	// Row isolation is a property of the fixture -- a fresh scratch scene and
+	// input per row -- and never needed a socket of its own. Connecting per row
+	// bought nothing and cost reliability: goobs v1.8.3 panics on disconnect if
+	// the server pushes a message at the wrong moment. client.go:351-368 checks
+	// whether `Disconnected` is closed and then sends on `Opcodes`, but
+	// markDisconnected closes both, so a message arriving between the check and
+	// the send is a send on a closed channel. That is a panic in goobs' own
+	// goroutine: it cannot be recovered from here, and it fails the run.
+	//
+	// Every row creates and removes scenes, inputs and filters, so OBS is
+	// almost always emitting an event as a row tears down -- exactly the window
+	// the race needs. Disconnecting once instead of once per row does not fix
+	// goobs, but it removes the repetition that was making a rare race a
+	// regular one.
+	client := liveClient(t)
 
+	obstest.RunContract(t, func(t *testing.T) (obstest.ContractClient, obstest.Fixture) {
 		// A scratch scene per row, so rows cannot interfere and a failure leaves
 		// nothing behind in the user's OBS. Removing the scene also frees the
 		// input, which nothing else references.
