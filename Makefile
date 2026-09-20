@@ -61,6 +61,17 @@ test-coverage:
 # Requires CGO_ENABLED=1 and a C compiler (gcc/MinGW on Windows, xcode-select
 # on macOS). CI runs this on ubuntu-latest where gcc is pre-installed.
 .PHONY: test-race
+## test-live: Run the contract suite against a real OBS (requires OBS running)
+##
+## The same contract the fake is checked against, run against obs-websocket. That
+## parity is what stops the fake drifting into being more agreeable than OBS.
+## Deliberately not in CI: a runner has no OBS. Creates and removes a scratch
+## scene; it touches nothing else.
+##
+##   OBS_LIVE_TEST=1 make test-live
+test-live:
+	$(GOTEST) -tags obslive -v ./internal/obs/...
+
 test-race:
 	CGO_ENABLED=1 $(GOTEST) -v -race ./...
 

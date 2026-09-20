@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Contract test suite for the OBS client (FB-58)** — `internal/obs/obstest`
+  holds one behavioural contract run against two implementations: an in-memory
+  fake in CI, and a real obs-websocket connection under `go test -tags obslive`
+  (`make test-live`). `internal/obs/commands.go` is 1,642 lines and 66 request
+  methods with effectively no direct coverage; everything was tested through a
+  mock that *replaces* that layer, so defects living in the goobs boundary were
+  structurally invisible — which is exactly where FB-54 lived. Rows assert
+  observable behaviour rather than field lists, and compare transforms by
+  reflection, so a field added later is covered without anyone remembering to
+  extend the test.
 - **`toggle_source_visibility` accepts an explicit state (FB-55)** — pass
   `visible: true`/`false` to set the state directly, or omit it to keep the
   previous toggle behaviour. A bare toggle is not safe to retry: if a call times
