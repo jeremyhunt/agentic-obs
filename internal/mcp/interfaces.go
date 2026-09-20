@@ -1,140 +1,39 @@
 package mcp
 
 import (
-	"github.com/andreykaipov/goobs/api/typedefs"
 	"github.com/ironystock/agentic-obs/internal/obs"
 )
 
-// OBSClient defines the interface for OBS client operations.
-// This interface allows the Server to use either a real OBS client or a mock for testing.
+// OBSClient is what the Server needs from OBS: every role, because the Server is
+// the composition root and registers tools across the whole surface.
+//
+// It is a composition rather than a list. The list ran to 76 hand-maintained
+// method signatures, which meant a capability could be added to the client and
+// never reach a consumer, or be declared here and exist nowhere else. Roles are
+// declared once in internal/obs/roles.go, next to the client that implements
+// them, and consumers narrower than the Server take only the roles they use --
+// see automation.OBSClient.
+//
+// Do not add a method signature here. Add it to a role; a test enforces this.
 type OBSClient interface {
-	// Connection management
-	Connect() error
-	Disconnect() error
-	Close() error
-	IsConnected() bool
-	GetConnectionStatus() (obs.ConnectionStatus, error)
-	HealthCheck() error
-
-	// Scene operations
-	GetSceneList() ([]string, string, error)
-	GetSceneByName(name string) (*obs.Scene, error)
-	SetCurrentScene(name string) error
-	CreateScene(name string) error
-	RemoveScene(name string) error
-
-	// Recording operations
-	StartRecording() error
-	StopRecording() (string, error)
-	GetRecordingStatus() (*obs.RecordingStatus, error)
-	PauseRecording() error
-	ResumeRecording() error
-
-	// Streaming operations
-	StartStreaming() error
-	StopStreaming() error
-	GetStreamingStatus() (*obs.StreamingStatus, error)
-
-	// Source operations
-	ListSources() ([]*typedefs.Input, error)
-	GetSourceSettings(sourceName string) (map[string]interface{}, error)
-	ToggleSourceVisibility(sceneName string, sourceID int) (bool, error)
-	SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error
-
-	// Audio operations
-	GetInputMute(inputName string) (bool, error)
-	ToggleInputMute(inputName string) error
-	SetInputVolume(inputName string, volumeDb *float64, volumeMul *float64) error
-	GetInputVolume(inputName string) (float64, float64, error)
-
-	// Status
-	GetOBSStatus() (*obs.OBSStatus, error)
-
-	// Scene preset operations
-	CaptureSceneState(sceneName string) ([]obs.SourceState, error)
-	ApplyScenePreset(sceneName string, sources []obs.SourceState) error
-
-	// Screenshot operations
-	TakeSourceScreenshot(opts obs.ScreenshotOptions) (string, error)
-	CreateBrowserSource(sceneName, sourceName string, settings obs.BrowserSourceSettings) (int, error)
-
-	// Scene design - source creation
-	CreateInput(sceneName, sourceName, inputKind string, settings map[string]interface{}) (int, error)
-
-	// Scene design - transform operations
-	GetSceneItemTransform(sceneName string, sceneItemID int) (*obs.SceneItemTransform, error)
-	SetSceneItemTransform(sceneName string, sceneItemID int, transform *obs.SceneItemTransform) error
-	SetSceneItemIndex(sceneName string, sceneItemID int, index int) error
-
-	// Scene design - item management
-	SetSceneItemLocked(sceneName string, sceneItemID int, locked bool) error
-	GetSceneItemLocked(sceneName string, sceneItemID int) (bool, error)
-	DuplicateSceneItem(sceneName string, sceneItemID int, destScene string) (int, error)
-	RemoveSceneItem(sceneName string, sceneItemID int) error
-
-	// Scene design - input kinds
-	GetInputKindList() ([]string, error)
-
-	// Audio device enumeration and creation
-	GetSpecialInputs() (*obs.SpecialInputs, error)
-	GetInputPropertiesItems(inputName, propertyName string) ([]obs.AudioDevice, error)
-	CreateAudioInput(sceneName, sourceName, inputKind, deviceID string) (int, error)
-
-	// Filter operations
-	GetSourceFilterList(sourceName string) ([]obs.FilterInfo, error)
-	GetSourceFilter(sourceName, filterName string) (*obs.FilterDetails, error)
-	CreateSourceFilter(sourceName, filterName, filterKind string, settings map[string]interface{}) error
-	RemoveSourceFilter(sourceName, filterName string) error
-	SetSourceFilterEnabled(sourceName, filterName string, enabled bool) error
-	SetSourceFilterSettings(sourceName, filterName string, settings map[string]interface{}, overlay bool) error
-	GetSourceFilterKindList() ([]string, error)
-
-	// Transition operations
-	GetSceneTransitionList() ([]obs.TransitionInfo, string, error)
-	GetCurrentSceneTransition() (*obs.TransitionDetails, error)
-	SetCurrentSceneTransition(transitionName string) error
-	SetCurrentSceneTransitionDuration(durationMs int) error
-	TriggerStudioModeTransition() error
-
-	// Virtual camera operations
-	// Note: Start/Stop methods are kept internal for programmatic use cases.
-	// MCP tools expose only Toggle for simplicity - AI agents can check status
-	// first if they need idempotent behavior.
-	GetVirtualCamStatus() (*obs.VirtualCamStatus, error)
-	ToggleVirtualCam() (bool, error)
-	StartVirtualCam() error
-	StopVirtualCam() error
-
-	// Replay buffer operations
-	// Note: Start/Stop methods are kept internal for programmatic use cases.
-	// MCP tools expose only Toggle for simplicity - AI agents can check status
-	// first if they need idempotent behavior.
-	GetReplayBufferStatus() (*obs.ReplayBufferStatus, error)
-	ToggleReplayBuffer() (bool, error)
-	StartReplayBuffer() error
-	StopReplayBuffer() error
-	SaveReplayBuffer() error
-	GetLastReplayBufferReplay() (string, error)
-
-	// Studio mode operations
-	GetStudioModeEnabled() (bool, error)
-	SetStudioModeEnabled(enabled bool) error
-	GetCurrentPreviewScene() (string, error)
-	SetCurrentPreviewScene(sceneName string) error
-
-	// Hotkey operations
-	TriggerHotkeyByName(hotkeyName string) error
-	GetHotkeyList() ([]string, error)
-
-	// Advanced Scene Switcher (vendor: "AdvancedSceneSwitcher") operations.
-	// All three are fire-and-forget — ASS returns no useful data, so the
-	// wrappers only surface errors.
-	ASSSendMessage(message string) error
-	ASSRunMacro(name string, variables []obs.ASSVariable) error
-	ASSSetVariables(variables []obs.ASSVariable) error
-
-	// Event handling
-	SetEventCallback(callback obs.EventCallback)
+	obs.Connector
+	obs.SceneReader
+	obs.SceneWriter
+	obs.SceneItemReader
+	obs.SceneItemWriter
+	obs.InputReader
+	obs.InputConfigurer
+	obs.AudioController
+	obs.FilterManager
+	obs.OutputController
+	obs.StudioController
+	obs.TransitionController
+	obs.HotkeyTrigger
+	obs.Screenshotter
+	obs.StatusReader
+	obs.ScenePresetOperator
+	obs.AdvancedSceneSwitcherController
+	obs.EventSource
 }
 
 // Verify that obs.Client implements OBSClient at compile time

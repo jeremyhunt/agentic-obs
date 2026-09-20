@@ -723,6 +723,34 @@ func (m *MockOBSClient) SetSceneItemEnabled(sceneName string, sceneItemID int, e
 	return fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
 }
 
+// GetSceneItemEnabled reports a scene item's visibility.
+//
+// It reads the same m.sceneItems entry SetSceneItemEnabled writes, so the two
+// cannot disagree. That is not true of every pair on this mock -- transforms and
+// lock states live in separate maps -- which is why obstest.Fake exists and why
+// this mock is scheduled to be replaced by it.
+func (m *MockOBSClient) GetSceneItemEnabled(sceneName string, sceneItemID int) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return false, fmt.Errorf("not connected to OBS")
+	}
+
+	items, exists := m.sceneItems[sceneName]
+	if !exists {
+		return false, fmt.Errorf("scene '%s' not found", sceneName)
+	}
+
+	for _, item := range items {
+		if item.ID == sceneItemID {
+			return item.Enabled, nil
+		}
+	}
+
+	return false, fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
+}
+
 func (m *MockOBSClient) ToggleSourceVisibility(sceneName string, sourceID int) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

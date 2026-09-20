@@ -15,7 +15,15 @@ import (
 )
 
 // MockOBSClient implements OBSClient for testing.
+//
+// The embedded OBSClient is deliberately left nil. It satisfies every method of
+// every composed role, so this double only has to define the ones the executor
+// actually exercises -- and any call to an unstubbed method panics rather than
+// returning a plausible zero value. A double that silently answers a question it
+// was never taught is how a test comes to agree with a client that is wrong.
 type MockOBSClient struct {
+	OBSClient
+
 	mu            sync.Mutex
 	actions       []string
 	currentScene  string
