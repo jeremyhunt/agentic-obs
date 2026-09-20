@@ -39,6 +39,13 @@ type InputSettingsClient interface {
 	GetInputDefaultSettings(inputKind string) (map[string]interface{}, error)
 }
 
+// AudioClient covers an input's mute state.
+type AudioClient interface {
+	GetInputMute(inputName string) (bool, error)
+	SetInputMute(inputName string, muted bool) error
+	ToggleInputMute(inputName string) error
+}
+
 // FilterClient covers filters attached to a source.
 type FilterClient interface {
 	CreateSourceFilter(sourceName, filterName, filterKind string, settings map[string]interface{}) error
@@ -54,6 +61,7 @@ type ContractClient interface {
 	SceneItemClient
 	InputClient
 	InputSettingsClient
+	AudioClient
 	FilterClient
 }
 
@@ -325,6 +333,67 @@ func RunContract(t *testing.T, newClient NewClient) {
 			t.Errorf("expected an error creating a second input named %q", fx.SourceName)
 		}
 	})
+	t.Run("setting mute is idempotent, not a toggle", func(t *testing.T) {
+		client, fx := newClient(t)
+		audio := newAudioInput(t, client, fx)
+
+		// The FB-55 argument again, on audio, where getting it wrong is worse: a
+		// rule that asks for muted=true and gets a flip leaves the stream silent,
+		// and nobody notices until the VOD.
+		for _, want := range []bool{true, false} {
+			if err := client.SetInputMute(audio, want); err != nil {
+				t.Fatalf("SetInputMute(%v): %v", want, err)
+			}
+			if err := client.SetInputMute(audio, want); err != nil {
+				t.Fatalf("SetInputMute(%v) second call: %v", want, err)
+			}
+
+			got, err := client.GetInputMute(audio)
+			if err != nil {
+				t.Fatalf("GetInputMute: %v", err)
+			}
+			if got != want {
+				t.Errorf("set muted=%v twice, read back %v", want, got)
+			}
+		}
+	})
+	t.Run("toggling mute flips whatever the state is", func(t *testing.T) {
+		client, fx := newClient(t)
+		audio := newAudioInput(t, client, fx)
+
+		// The toggle still has to work: it is what a bare toggle_input_mute call
+		// does, and its result must depend on the current state rather than
+		// landing on a fixed one.
+		if err := client.SetInputMute(audio, false); err != nil {
+			t.Fatalf("SetInputMute: %v", err)
+		}
+		if err := client.ToggleInputMute(audio); err != nil {
+			t.Fatalf("ToggleInputMute: %v", err)
+		}
+
+		got, err := client.GetInputMute(audio)
+		if err != nil {
+			t.Fatalf("GetInputMute: %v", err)
+		}
+		if !got {
+			t.Error("toggling from unmuted left the input unmuted")
+		}
+	})
+	t.Run("muting a source with no audio is rejected", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// Found by running this contract against a real OBS, after the first
+		// draft of the rows above assumed the opposite and muted the colour
+		// source fixture. obs-websocket answers InvalidResourceState (604), "The
+		// specified input does not support audio."
+		//
+		// It matters for automation: a rule muting by source name will fail
+		// outright if the name is a colour source or an image, rather than
+		// quietly doing nothing, so the error has to reach the caller. (FB-68)
+		if err := client.SetInputMute(fx.SourceName, true); err == nil {
+			t.Errorf("muting %q (%s) succeeded; that kind has no audio", fx.SourceName, fx.SourceKind)
+		}
+	})
 	t.Run("source settings merge when overlay is on and replace when it is off", func(t *testing.T) {
 		client, fx := newClient(t)
 
@@ -549,6 +618,26 @@ func RunContract(t *testing.T, newClient NewClient) {
 			t.Error("expected an error creating a second filter named \"probe\" on the same source")
 		}
 	})
+}
+
+// audioInputKind is the kind the mute rows create.
+//
+// A media source rather than a capture device: it supports audio, and it needs
+// no hardware, so a live run does not have to bind a real microphone on the
+// operator's machine to test muting.
+const audioInputKind = "ffmpeg_source"
+
+// newAudioInput adds an audio-capable input to the fixture's scene and returns
+// its name. The fixture's own source is a colour source, which OBS refuses to
+// mute.
+func newAudioInput(t *testing.T, client ContractClient, fx Fixture) string {
+	t.Helper()
+
+	name := fx.SceneName + "-audio"
+	if _, err := client.CreateInput(fx.SceneName, name, audioInputKind, nil); err != nil {
+		t.Fatalf("CreateInput(%s): %v", audioInputKind, err)
+	}
+	return name
 }
 
 // filterKind is the kind the filter rows attach. Colour correction is part of

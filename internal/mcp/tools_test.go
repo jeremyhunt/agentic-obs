@@ -469,21 +469,25 @@ func TestHandleToggleInputMute(t *testing.T) {
 	t.Run("toggles mute successfully", func(t *testing.T) {
 		server, _ := testServer(t)
 
-		input := InputNameInput{InputName: "Microphone"}
+		input := ToggleInputMuteInput{InputName: "Microphone"}
 		_, result, err := server.handleToggleInputMute(context.Background(), nil, input)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		simpleResult, ok := result.(SimpleResult)
+		// The result reports the state the input ended in, not just that
+		// something happened: a toggle's outcome depends on where it started,
+		// so a caller has no other way to find out. (FB-68)
+		res, ok := result.(map[string]interface{})
 		require.True(t, ok)
-		assert.Contains(t, simpleResult.Message, "Microphone")
+		assert.Contains(t, res["message"], "Microphone")
+		assert.Contains(t, res, "muted")
 	})
 
 	t.Run("returns error for non-existent input", func(t *testing.T) {
 		server, _ := testServer(t)
 
-		input := InputNameInput{InputName: "NonExistent"}
+		input := ToggleInputMuteInput{InputName: "NonExistent"}
 		_, _, err := server.handleToggleInputMute(context.Background(), nil, input)
 
 		assert.Error(t, err)
@@ -1848,7 +1852,7 @@ func TestHandleToggleVirtualCam(t *testing.T) {
 		server, mock := testServer(t)
 		mock.SetVirtualCamState(false)
 
-		_, result, err := server.handleToggleVirtualCam(context.Background(), nil, struct{}{})
+		_, result, err := server.handleToggleVirtualCam(context.Background(), nil, ToggleOutputInput{})
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -1863,7 +1867,7 @@ func TestHandleToggleVirtualCam(t *testing.T) {
 		server, mock := testServer(t)
 		mock.SetVirtualCamState(true)
 
-		_, result, err := server.handleToggleVirtualCam(context.Background(), nil, struct{}{})
+		_, result, err := server.handleToggleVirtualCam(context.Background(), nil, ToggleOutputInput{})
 
 		assert.NoError(t, err)
 		resultMap := result.(map[string]interface{})
@@ -1875,7 +1879,7 @@ func TestHandleToggleVirtualCam(t *testing.T) {
 		server, mock := testServer(t)
 		mock.Disconnect()
 
-		_, _, err := server.handleToggleVirtualCam(context.Background(), nil, struct{}{})
+		_, _, err := server.handleToggleVirtualCam(context.Background(), nil, ToggleOutputInput{})
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not connected")
@@ -1927,7 +1931,7 @@ func TestHandleToggleReplayBuffer(t *testing.T) {
 		server, mock := testServer(t)
 		mock.SetReplayBufferState(false)
 
-		_, result, err := server.handleToggleReplayBuffer(context.Background(), nil, struct{}{})
+		_, result, err := server.handleToggleReplayBuffer(context.Background(), nil, ToggleOutputInput{})
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -1942,7 +1946,7 @@ func TestHandleToggleReplayBuffer(t *testing.T) {
 		server, mock := testServer(t)
 		mock.SetReplayBufferState(true)
 
-		_, result, err := server.handleToggleReplayBuffer(context.Background(), nil, struct{}{})
+		_, result, err := server.handleToggleReplayBuffer(context.Background(), nil, ToggleOutputInput{})
 
 		assert.NoError(t, err)
 		resultMap := result.(map[string]interface{})
@@ -1954,7 +1958,7 @@ func TestHandleToggleReplayBuffer(t *testing.T) {
 		server, mock := testServer(t)
 		mock.Disconnect()
 
-		_, _, err := server.handleToggleReplayBuffer(context.Background(), nil, struct{}{})
+		_, _, err := server.handleToggleReplayBuffer(context.Background(), nil, ToggleOutputInput{})
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not connected")
@@ -2296,13 +2300,13 @@ func TestVirtualCamAndReplayBufferWorkflow(t *testing.T) {
 		assert.False(t, rbStatus.Active)
 
 		// 2. Start virtual camera
-		_, _, err := server.handleToggleVirtualCam(context.Background(), nil, struct{}{})
+		_, _, err := server.handleToggleVirtualCam(context.Background(), nil, ToggleOutputInput{})
 		require.NoError(t, err)
 		vcStatus, _ = mock.GetVirtualCamStatus()
 		assert.True(t, vcStatus.Active)
 
 		// 3. Start replay buffer
-		_, _, err = server.handleToggleReplayBuffer(context.Background(), nil, struct{}{})
+		_, _, err = server.handleToggleReplayBuffer(context.Background(), nil, ToggleOutputInput{})
 		require.NoError(t, err)
 		rbStatus, _ = mock.GetReplayBufferStatus()
 		assert.True(t, rbStatus.Active)
@@ -2318,9 +2322,9 @@ func TestVirtualCamAndReplayBufferWorkflow(t *testing.T) {
 		assert.NotEmpty(t, resultMap["saved_replay_path"])
 
 		// 6. Stop both
-		_, _, err = server.handleToggleVirtualCam(context.Background(), nil, struct{}{})
+		_, _, err = server.handleToggleVirtualCam(context.Background(), nil, ToggleOutputInput{})
 		require.NoError(t, err)
-		_, _, err = server.handleToggleReplayBuffer(context.Background(), nil, struct{}{})
+		_, _, err = server.handleToggleReplayBuffer(context.Background(), nil, ToggleOutputInput{})
 		require.NoError(t, err)
 
 		// 7. Verify both stopped
