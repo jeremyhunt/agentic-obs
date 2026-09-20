@@ -211,17 +211,24 @@ func (f *Fake) SetSceneItemTransform(sceneName string, sceneItemID int, transfor
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// obs-websocket answers RequestFieldEmpty (403) for an empty boundsType.
-	// Rejecting it here keeps the fake honest; accepting it made tests pass that
-	// would fail against a real OBS. (FB-58)
-	if transform.BoundsType == "" {
-		return fmt.Errorf("the field value of `boundsType` must not be empty")
-	}
-	// Enforced even for OBS_BOUNDS_NONE, where the dimensions go unused.
-	if transform.BoundsWidth < 1 {
+	// obs-websocket rejects an empty boundsType (RequestFieldEmpty, 403) and any
+	// bounds dimension below 1 (RequestFieldOutOfRange, 402), even under
+	// OBS_BOUNDS_NONE where the dimensions are inert. The client normalises
+	// those away, because OBS reports zero bounds for an item that never had a
+	// bounding box and would otherwise refuse to accept its own output. (FB-64)
+	//
+	// The fake stands in for the client, not for the wire, so it applies exactly
+	// the same normalisation -- sharing the function rather than restating the
+	// rule, so the two cannot drift.
+	boundsType, boundsWidth, boundsHeight := obs.NormaliseBounds(
+		transform.BoundsType, transform.BoundsWidth, transform.BoundsHeight)
+
+	// A real bounds mode with an impossible size is still an error: the caller
+	// asked for something OBS cannot do, rather than leaving a field unset.
+	if boundsWidth < 1 {
 		return fmt.Errorf("the field value of `boundsWidth` is below the minimum of `1.000000`")
 	}
-	if transform.BoundsHeight < 1 {
+	if boundsHeight < 1 {
 		return fmt.Errorf("the field value of `boundsHeight` is below the minimum of `1.000000`")
 	}
 
@@ -232,6 +239,7 @@ func (f *Fake) SetSceneItemTransform(sceneName string, sceneItemID int, transfor
 
 	prev := it.transform
 	stored := *transform
+	stored.BoundsType, stored.BoundsWidth, stored.BoundsHeight = boundsType, boundsWidth, boundsHeight
 
 	// OBS derives these from the source and ignores them on a write, so keep
 	// whatever the item already had rather than accepting the values passed in.
