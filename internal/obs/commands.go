@@ -100,28 +100,43 @@ func (c *Client) GetSceneByName(name string) (*Scene, error) {
 
 	// Convert scene items to our SceneSource format
 	for _, item := range resp.SceneItems {
-		source := SceneSource{
-			ID:      int(item.SceneItemID),
-			Name:    item.SourceName,
-			Type:    item.SourceType,
-			Enabled: item.SceneItemEnabled,
-			Locked:  item.SceneItemLocked,
-		}
-
-		// Extract transform information (always available as a struct)
-		transform := item.SceneItemTransform
-		source.X = transform.PositionX
-		source.Y = transform.PositionY
-		source.Width = transform.Width
-		source.Height = transform.Height
-		source.ScaleX = transform.ScaleX
-		source.ScaleY = transform.ScaleY
-		source.Rotation = transform.Rotation
-
-		scene.Sources = append(scene.Sources, source)
+		scene.Sources = append(scene.Sources, sceneSourceFromItem(*item))
 	}
 
 	return scene, nil
+}
+
+// sceneSourceFromItem converts one goobs scene item into the shape this package
+// exposes.
+//
+// It is a free function rather than inline in GetSceneByName so it can be tested
+// without a websocket connection: the conversion is where fields get dropped,
+// and nothing that needs a live OBS to exercise will be covered in CI.
+func sceneSourceFromItem(item typedefs.SceneItem) SceneSource {
+	source := SceneSource{
+		ID:      int(item.SceneItemID),
+		Name:    item.SourceName,
+		Type:    item.SourceType,
+		Enabled: item.SceneItemEnabled,
+		Locked:  item.SceneItemLocked,
+		// obs-websocket has a single notion of an item showing --
+		// sceneItemEnabled -- so Visible is the same fact under the name the
+		// obs://scene/{name} resource publishes it as. It was never populated,
+		// which made that resource report every source as hidden. (FB-60)
+		Visible: item.SceneItemEnabled,
+	}
+
+	// Extract transform information (always available as a struct)
+	transform := item.SceneItemTransform
+	source.X = transform.PositionX
+	source.Y = transform.PositionY
+	source.Width = transform.Width
+	source.Height = transform.Height
+	source.ScaleX = transform.ScaleX
+	source.ScaleY = transform.ScaleY
+	source.Rotation = transform.Rotation
+
+	return source
 }
 
 // SetCurrentScene switches the active scene in OBS.
