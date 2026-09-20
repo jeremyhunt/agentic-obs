@@ -75,7 +75,7 @@ func TestHandleGetToolConfig(t *testing.T) {
 
 		assert.Len(t, groups, 1, "should have 1 group when filtering")
 		assert.Equal(t, "Audio", groups[0].Name)
-		assert.Equal(t, 4, groups[0].ToolCount)
+		assert.Equal(t, toolGroupMetadata["Audio"].Count(), groups[0].ToolCount)
 	})
 
 	t.Run("includes tool names when verbose", func(t *testing.T) {
@@ -144,7 +144,7 @@ func TestHandleSetToolConfig(t *testing.T) {
 		assert.Equal(t, "Audio", resultMap["group"])
 		assert.Equal(t, true, resultMap["previous_state"])
 		assert.Equal(t, false, resultMap["new_state"])
-		assert.Equal(t, 4, resultMap["tools_affected"])
+		assert.Equal(t, toolGroupMetadata["Audio"].Count(), resultMap["tools_affected"])
 
 		// Verify group is now disabled
 		assert.False(t, server.toolGroups.Audio)
