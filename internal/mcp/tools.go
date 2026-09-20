@@ -535,8 +535,40 @@ func (s *Server) registerToolHandlers() {
 			s.handleGetSourceSettings,
 		)
 
-		toolCount += 3
-		log.Println("Source tools registered (3 tools)")
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
+				Name:        "set_source_settings",
+				Description: "Write a source's settings. Merges by default; pass overlay=false to replace them entirely, resetting any key not supplied to its default",
+			},
+			s.handleSetSourceSettings,
+		)
+
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
+				Name:        "press_source_properties_button",
+				Description: "Press a button on a source's properties dialog, such as 'refreshnocache' to reload a browser source without changing its settings",
+			},
+			s.handlePressSourcePropertiesButton,
+		)
+
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
+				Name:        "get_input_default_settings",
+				Description: "Get the default settings for an input kind, to discover its settings keys without guessing",
+			},
+			s.handleGetInputDefaultSettings,
+		)
+
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
+				Name:        "list_input_property_items",
+				Description: "List the selectable items of a source property, such as the windows available to a window_capture or the devices available to an audio input",
+			},
+			s.handleListInputPropertyItems,
+		)
+
+		toolCount += 7
+		log.Println("Source tools registered (7 tools)")
 	}
 
 	// Audio tools

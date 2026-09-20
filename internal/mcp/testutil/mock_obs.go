@@ -66,9 +66,15 @@ type MockOBSClient struct {
 	sceneItemTransforms map[string]map[int]*obs.SceneItemTransform // scene -> itemID -> transform
 	sceneItemLocked     map[string]map[int]bool                    // scene -> itemID -> locked
 	inputKinds          []string                                   // available input kinds
+	inputDefaults       map[string]map[string]interface{}          // input kind -> default settings
+	buttonPresses       []string                                   // recorded "source:property" presses
 	nextSceneItemID     int                                        // counter for new scene items
 
 	// Error injection for design tools
+	ErrorOnSetSourceSettings          error
+	ErrorOnGetInputDefaultSettings    error
+	ErrorOnPressInputPropertiesButton error
+
 	ErrorOnCreateInput           error
 	ErrorOnGetSceneItemTransform error
 	ErrorOnSetSceneItemTransform error
@@ -199,6 +205,13 @@ func NewMockOBSClient() *MockOBSClient {
 			"text_gdiplus_v3", "image_source", "color_source_v3", "browser_source",
 			"ffmpeg_source", "wasapi_input_capture", "wasapi_output_capture",
 			"dshow_input", "game_capture", "window_capture", "monitor_capture",
+		},
+		inputDefaults: map[string]map[string]interface{}{
+			"color_source_v3": {"color": 4278190080.0, "width": 0.0, "height": 0.0},
+			"text_gdiplus_v3": {"text": "", "font": map[string]interface{}{"face": "Arial", "size": 36.0}, "color": 16777215.0},
+			"browser_source":  {"url": "https://obsproject.com/browser-source", "width": 800.0, "height": 600.0, "shutdown": false, "restart_when_active": false, "css": ""},
+			"image_source":    {"file": "", "unload": false},
+			"ffmpeg_source":   {"local_file": "", "looping": false, "restart_on_activate": true},
 		},
 		nextSceneItemID: 100,
 		// Filter mock data
@@ -721,6 +734,96 @@ func (m *MockOBSClient) GetSourceSettings(sourceName string) (map[string]interfa
 	return settings, nil
 }
 
+// SetSourceSettings writes a source's settings, merging or replacing.
+//
+// overlay=false resets to the kind's defaults before applying, so a key left out
+// reverts rather than persisting -- the behaviour obstest.Fake and a real OBS
+// both have, and the reason this is not a plain map assignment. (FB-67)
+func (m *MockOBSClient) SetSourceSettings(sourceName string, settings map[string]interface{}, overlay bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.ErrorOnSetSourceSettings != nil {
+		return m.ErrorOnSetSourceSettings
+	}
+
+	if !m.connected {
+		return fmt.Errorf("not connected to OBS")
+	}
+
+	current, exists := m.sourceSettings[sourceName]
+	if !exists {
+		return fmt.Errorf("source '%s' not found", sourceName)
+	}
+
+	if !overlay {
+		current = map[string]interface{}{}
+	}
+	for k, v := range settings {
+		current[k] = v
+	}
+	m.sourceSettings[sourceName] = current
+
+	return nil
+}
+
+// GetInputDefaultSettings returns the defaults for an input kind.
+func (m *MockOBSClient) GetInputDefaultSettings(inputKind string) (map[string]interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.ErrorOnGetInputDefaultSettings != nil {
+		return nil, m.ErrorOnGetInputDefaultSettings
+	}
+
+	if !m.connected {
+		return nil, fmt.Errorf("not connected to OBS")
+	}
+
+	defaults, exists := m.inputDefaults[inputKind]
+	if !exists {
+		return nil, fmt.Errorf("no such input kind '%s'", inputKind)
+	}
+
+	// A copy: defaults belong to the kind, and a caller editing what it read
+	// must not change what the next caller sees.
+	out := make(map[string]interface{}, len(defaults))
+	for k, v := range defaults {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// PressInputPropertiesButton records a button press so a test can assert one
+// happened. There is nothing to observe otherwise -- the press mutates no
+// settings, which is the point of it.
+func (m *MockOBSClient) PressInputPropertiesButton(sourceName, propertyName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.ErrorOnPressInputPropertiesButton != nil {
+		return m.ErrorOnPressInputPropertiesButton
+	}
+
+	if !m.connected {
+		return fmt.Errorf("not connected to OBS")
+	}
+
+	if _, exists := m.sourceSettings[sourceName]; !exists {
+		return fmt.Errorf("source '%s' not found", sourceName)
+	}
+
+	m.buttonPresses = append(m.buttonPresses, sourceName+":"+propertyName)
+	return nil
+}
+
+// ButtonPresses returns the presses recorded so far, as "source:property".
+func (m *MockOBSClient) ButtonPresses() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]string(nil), m.buttonPresses...)
+}
+
 // ToggleSourceVisibility simulates toggling source visibility.
 // SetSceneItemEnabled sets a scene item's visibility to an explicit state.
 func (m *MockOBSClient) SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error {
@@ -959,8 +1062,11 @@ func (m *MockOBSClient) AddSource(input *typedefs.Input) {
 	m.sources = append(m.sources, input)
 }
 
-// SetSourceSettings sets the settings for a source.
-func (m *MockOBSClient) SetSourceSettings(sourceName string, settings map[string]interface{}) {
+// SetSourceSettingsState seeds a source's settings directly, without going
+// through the OBS operation. Named like its neighbours SetInputMuteState and
+// SetInputVolumeState; it used to be called SetSourceSettings, which collided
+// with the real operation once that was added. (FB-67)
+func (m *MockOBSClient) SetSourceSettingsState(sourceName string, settings map[string]interface{}) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sourceSettings[sourceName] = settings

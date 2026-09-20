@@ -31,6 +31,14 @@ type InputClient interface {
 	ListSources() ([]*typedefs.Input, error)
 }
 
+// InputSettingsClient covers reading and writing a source's own settings, and
+// the property buttons OBS exposes on its properties dialog.
+type InputSettingsClient interface {
+	GetSourceSettings(sourceName string) (map[string]interface{}, error)
+	SetSourceSettings(sourceName string, settings map[string]interface{}, overlay bool) error
+	GetInputDefaultSettings(inputKind string) (map[string]interface{}, error)
+}
+
 // FilterClient covers filters attached to a source.
 type FilterClient interface {
 	CreateSourceFilter(sourceName, filterName, filterKind string, settings map[string]interface{}) error
@@ -45,6 +53,7 @@ type FilterClient interface {
 type ContractClient interface {
 	SceneItemClient
 	InputClient
+	InputSettingsClient
 	FilterClient
 }
 
@@ -314,6 +323,90 @@ func RunContract(t *testing.T, newClient NewClient) {
 		// cannot be "try create, ignore the error" unless the error is reliable.
 		if _, err := client.CreateInput(fx.SceneName, fx.SourceName, fx.SourceKind, nil); err == nil {
 			t.Errorf("expected an error creating a second input named %q", fx.SourceName)
+		}
+	})
+	t.Run("source settings merge when overlay is on and replace when it is off", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// The same distinction filters have, on the source itself. It is the one
+		// thing every bypassing script in the workspace needs: obs_wire.py and
+		// obs_starting_soon.py both call SetInputSettings directly because
+		// agentic-obs has no way to write a source's settings at all. (FB-67)
+		//
+		// The colour source used as the fixture takes a colour and dimensions, so
+		// these are real keys rather than a probe.
+		if err := client.SetSourceSettings(fx.SourceName, map[string]interface{}{
+			"width": 640.0, "height": 480.0,
+		}, true); err != nil {
+			t.Fatalf("SetSourceSettings(overlay=true): %v", err)
+		}
+
+		got, err := client.GetSourceSettings(fx.SourceName)
+		if err != nil {
+			t.Fatalf("GetSourceSettings: %v", err)
+		}
+		if got["width"] != 640.0 || got["height"] != 480.0 {
+			t.Errorf("settings read back as width=%#v height=%#v, want 640/480",
+				got["width"], got["height"])
+		}
+
+		// overlay=false resets to defaults before applying, so a key left out is
+		// no longer whatever it was set to.
+		if err := client.SetSourceSettings(fx.SourceName, map[string]interface{}{
+			"width": 1280.0,
+		}, false); err != nil {
+			t.Fatalf("SetSourceSettings(overlay=false): %v", err)
+		}
+
+		got, err = client.GetSourceSettings(fx.SourceName)
+		if err != nil {
+			t.Fatalf("GetSourceSettings: %v", err)
+		}
+		if got["width"] != 1280.0 {
+			t.Errorf("width is %#v after a replacing write, want 1280", got["width"])
+		}
+		if got["height"] == 480.0 {
+			t.Error("height survived an overlay=false write; that write replaces, it does not merge")
+		}
+	})
+	t.Run("default settings are reported per input kind", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// Settings-key discovery without guessing. It is also what makes a
+		// meaningful diff possible: a stored setting equal to the default must not
+		// read as drift, and the only way to know is to ask.
+		defaults, err := client.GetInputDefaultSettings(fx.SourceKind)
+		if err != nil {
+			t.Fatalf("GetInputDefaultSettings(%q): %v", fx.SourceKind, err)
+		}
+		if len(defaults) == 0 {
+			t.Errorf("%s reports no default settings at all", fx.SourceKind)
+		}
+	})
+	t.Run("defaults are not affected by one input's settings", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// Defaults belong to the kind, not to an instance. Reporting an instance's
+		// current settings as the kind's defaults would make every comparison
+		// against them vacuous.
+		before, err := client.GetInputDefaultSettings(fx.SourceKind)
+		if err != nil {
+			t.Fatalf("GetInputDefaultSettings: %v", err)
+		}
+
+		if err := client.SetSourceSettings(fx.SourceName, map[string]interface{}{
+			"width": 4242.0,
+		}, true); err != nil {
+			t.Fatalf("SetSourceSettings: %v", err)
+		}
+
+		after, err := client.GetInputDefaultSettings(fx.SourceKind)
+		if err != nil {
+			t.Fatalf("GetInputDefaultSettings: %v", err)
+		}
+		if after["width"] != before["width"] {
+			t.Errorf("default width changed from %#v to %#v after setting one input's width",
+				before["width"], after["width"])
 		}
 	})
 	t.Run("a created filter is listed with its kind, enabled, and its settings", func(t *testing.T) {
