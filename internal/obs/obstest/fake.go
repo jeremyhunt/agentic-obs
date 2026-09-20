@@ -48,6 +48,20 @@ func (f *Fake) SetSceneItemTransform(sceneName string, sceneItemID int, transfor
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	// obs-websocket answers RequestFieldEmpty (403) for an empty boundsType.
+	// Rejecting it here keeps the fake honest; accepting it made tests pass that
+	// would fail against a real OBS. (FB-58)
+	if transform.BoundsType == "" {
+		return fmt.Errorf("the field value of `boundsType` must not be empty")
+	}
+	// Enforced even for OBS_BOUNDS_NONE, where the dimensions go unused.
+	if transform.BoundsWidth < 1 {
+		return fmt.Errorf("the field value of `boundsWidth` is below the minimum of `1.000000`")
+	}
+	if transform.BoundsHeight < 1 {
+		return fmt.Errorf("the field value of `boundsHeight` is below the minimum of `1.000000`")
+	}
+
 	key := itemKey{sceneName, sceneItemID}
 	stored := *transform
 

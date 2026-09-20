@@ -17,6 +17,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   observable behaviour rather than field lists, and compare transforms by
   reflection, so a field added later is covered without anyone remembering to
   extend the test.
+
+  Running it against a real OBS immediately found two ways the fake had been more
+  permissive than obs-websocket, both of which affect any code that builds a
+  transform from scratch rather than reading one first: `boundsType` must not be
+  empty (`RequestFieldEmpty`, 403), and `boundsWidth`/`boundsHeight` must be at
+  least 1 even for `OBS_BOUNDS_NONE` (`RequestFieldOutOfRange`, 402). goobs sends
+  every field with no `omitempty`, so unset values are transmitted as zero rather
+  than omitted. Both are now contract rows and both are enforced by the fake.
+  `apply_scene_spec` will construct transforms from scratch and would have hit
+  this.
 - **`toggle_source_visibility` accepts an explicit state (FB-55)** — pass
   `visible: true`/`false` to set the state directly, or omit it to keep the
   previous toggle behaviour. A bare toggle is not safe to retry: if a call times
