@@ -225,7 +225,7 @@ Ordered by sprint, then priority. Items marked `—` in the Sprint column are un
 | FB-33 | Skills Modernization Sweep | Medium | Medium | **0.5** | FB-20 ✅, FB-27 ✅ | Audit all 4 skills against 81 tools + 14 prompts; add automation coverage to `streaming-assistant`; folds FB-30 and FB-31 |
 | FB-35 | Deprecated field audit (`currentProgram*` / `currentPreview*`) | Medium | Low | **0.5** | FB-34 | Migrate off scene-response fields flagged for removal in obs-websocket protocol |
 | FB-36 | `RecordFileChanged` event wiring | Low | Low | **0.5** | FB-34 | Bridge OBS 30+ file-split event into the automation engine's event bridge |
-| FB-37 | Automation cooldown race fix | Medium | Low-Med | **0.5** | FB-20 ✅ | Move `recordCooldown` from execute-end to dispatch-time; fixes intermittent `TestEngineCooldown` at `-count>=3` |
+| FB-37 | Automation cooldown race fix ✅ | Medium | Low-Med | **0.5** | FB-20 ✅ | Move `recordCooldown` from execute-end to dispatch-time; fixes intermittent `TestEngineCooldown` at `-count>=3` |
 | FB-38 | Automation queue-overflow metric | Low | Low | **0.5** | FB-20 ✅ | Expose `dropped_events_total` counter for the engine's 100-deep `eventChan` |
 | FB-39 | Automation concurrency tests | Medium | Medium | **0.5** | FB-20 ✅ | Stress tests for cooldown map + rule cache; may need a CGO-enabled test lane for `-race` |
 | FB-40 | Automation `OnError="stop"` test | Low | Low | **0.5** | FB-20 ✅ | Unit test covering action-chain halt when `OnError=stop` |

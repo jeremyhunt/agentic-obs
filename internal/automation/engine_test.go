@@ -286,11 +286,7 @@ func TestEngineEventTrigger(t *testing.T) {
 			},
 		})
 
-		// Wait for async processing
-		time.Sleep(100 * time.Millisecond)
-
-		actions := mock.GetActions()
-		assert.Contains(t, actions, "toggle_mute:Microphone")
+		requireActionEventually(t, mock, "toggle_mute:Microphone")
 	})
 
 	t.Run("does not trigger on non-matching event", func(t *testing.T) {
@@ -356,10 +352,7 @@ func TestEngineManualTrigger(t *testing.T) {
 		err := engine.TriggerRule(ruleID)
 		require.NoError(t, err)
 
-		time.Sleep(100 * time.Millisecond)
-
-		actions := mock.GetActions()
-		assert.Contains(t, actions, "start_recording")
+		requireActionEventually(t, mock, "start_recording")
 	})
 
 	t.Run("triggers by name", func(t *testing.T) {
@@ -368,10 +361,7 @@ func TestEngineManualTrigger(t *testing.T) {
 		err := engine.TriggerRuleByName("manual-trigger-test")
 		require.NoError(t, err)
 
-		time.Sleep(100 * time.Millisecond)
-
-		actions := mock.GetActions()
-		assert.Contains(t, actions, "start_recording")
+		requireActionEventually(t, mock, "start_recording")
 	})
 
 	t.Run("returns error for non-existent rule", func(t *testing.T) {
@@ -397,7 +387,7 @@ func TestEngineCooldown(t *testing.T) {
 		Actions: []storage.RuleAction{
 			{Type: ActionTypeStartRecording},
 		},
-		CooldownMs: 500, // 500ms cooldown
+		CooldownMs: 500,
 	}
 
 	_, err := db.CreateAutomationRule(ctx, rule)
@@ -405,6 +395,12 @@ func TestEngineCooldown(t *testing.T) {
 
 	mock := NewMockOBSClient()
 	engine := NewAutomationEngine(db, mock)
+
+	// Drive time explicitly. The previous version slept 500ms to wait out a
+	// 500ms cooldown, which races the boundary -- that is FB-37, the intermittent
+	// failure at -count>=3. (FB-56)
+	clk := newFakeClock()
+	engine.clock = clk
 
 	err = engine.Start()
 	require.NoError(t, err)
@@ -415,23 +411,42 @@ func TestEngineCooldown(t *testing.T) {
 		Data:      map[string]interface{}{},
 	}
 
-	// First trigger should execute
+	// Dispatch is asynchronous, so wait for the effect rather than for a fixed
+	// duration: the action count is the observable we actually care about.
 	engine.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
-	assert.Len(t, mock.GetActions(), 1)
+	requireActionCount(t, mock, 1)
 
-	// Second trigger within cooldown should be skipped
+	// Inside the cooldown: no second execution. Asserted as "stays at 1 for a
+	// while" rather than "is 1 right now", so a slow machine cannot pass it by
+	// accident.
 	engine.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
-	assert.Len(t, mock.GetActions(), 1) // Still 1
+	assertActionCountStaysAt(t, mock, 1)
 
-	// Wait for cooldown to expire
-	time.Sleep(500 * time.Millisecond)
+	// Past the cooldown. One millisecond beyond the boundary, with no ambiguity
+	// about which side of it we are on.
+	clk.Advance(501 * time.Millisecond)
 
-	// Third trigger should execute
 	engine.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
-	assert.Len(t, mock.GetActions(), 2)
+	requireActionCount(t, mock, 2)
+}
+
+// requireActionCount waits for the mock to record exactly n actions.
+func requireActionCount(t *testing.T, mock *MockOBSClient, n int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return len(mock.GetActions()) == n
+	}, 2*time.Second, 5*time.Millisecond,
+		"expected %d action(s), got %v", n, mock.GetActions())
+}
+
+// assertActionCountStaysAt asserts the count does not move, which is how a
+// suppressed execution shows up.
+func assertActionCountStaysAt(t *testing.T, mock *MockOBSClient, n int) {
+	t.Helper()
+	assert.Never(t, func() bool {
+		return len(mock.GetActions()) != n
+	}, 200*time.Millisecond, 10*time.Millisecond,
+		"action count should have stayed at %d, got %v", n, mock.GetActions())
 }
 
 // TestEngineOnErrorStop verifies that an action with OnError="stop" halts
@@ -764,10 +779,9 @@ func TestEngineMultipleActions(t *testing.T) {
 	err = engine.TriggerRule(ruleID)
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
+	requireActionCount(t, mock, 3)
 
 	actions := mock.GetActions()
-	assert.Len(t, actions, 3)
 	assert.Equal(t, "set_scene:Gaming", actions[0])
 	assert.Equal(t, "start_recording", actions[1])
 	assert.Equal(t, "start_streaming", actions[2])
@@ -938,4 +952,19 @@ func TestRuleHelpers(t *testing.T) {
 	t.Run("GetSchedule", func(t *testing.T) {
 		assert.Equal(t, "0 * * * *", scheduleRule.GetSchedule())
 	})
+}
+
+// requireActionEventually waits for a specific action to be recorded, rather than
+// sleeping a guessed interval and hoping dispatch finished. (FB-56)
+func requireActionEventually(t *testing.T, mock *MockOBSClient, action string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		for _, a := range mock.GetActions() {
+			if a == action {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 5*time.Millisecond,
+		"expected action %q, got %v", action, mock.GetActions())
 }
