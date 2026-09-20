@@ -125,8 +125,16 @@ type Server struct {
 	toolGroups       ToolGroupConfig
 	toolGroupMutex   sync.RWMutex // Protects toolGroups for runtime config changes
 	thumbnailCache   *thumbnailCache
-	ctx              context.Context
-	cancel           context.CancelFunc
+
+	// sceneResourceURIs tracks which scenes are registered as concrete
+	// resources, so re-registering an unchanged one can be skipped. The SDK
+	// notifies on every AddResource, and a reconnect that re-announced every
+	// scene would look to a client like the scene list had changed. (FB-66)
+	sceneResourceMu   sync.Mutex
+	sceneResourceURIs map[string]bool
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // ServerConfig holds configuration for server initialization
@@ -321,6 +329,9 @@ func (s *Server) ConnectOBS() error {
 		return fmt.Errorf("%w: %v", ErrOBSUnavailable, err)
 	}
 	log.Println("Connected to OBS successfully")
+
+	// Scenes become concrete resources only once we can enumerate them.
+	s.syncSceneResources()
 	return nil
 }
 
@@ -485,8 +496,21 @@ func (s *Server) handleOBSEventNotification(eventType obs.EventType, data map[st
 
 	// Check if list changed (scene created or removed)
 	if obs.ShouldTriggerListChanged(eventType) {
-		// Resource list changed - clients should re-list resources
-		// The MCP SDK handles this automatically when resources are added/removed dynamically
+		// Add or drop the scene's concrete resource. The SDK emits
+		// notifications/resources/list_changed from AddResource and
+		// RemoveResources, so this is what actually tells clients. It used to say
+		// the SDK handled it "automatically when resources are added/removed
+		// dynamically" -- true, but nothing ever added or removed one, so the
+		// log line below was the only thing that happened. (FB-66)
+		if sceneName, ok := data["scene_name"].(string); ok {
+			switch eventType {
+			case obs.EventTypeSceneCreated:
+				s.addSceneResource(sceneName)
+			case obs.EventTypeSceneRemoved:
+				s.removeSceneResource(sceneName)
+			}
+		}
+
 		log.Printf("Scene list changed for event: %s", eventType)
 
 		// Clear entire thumbnail cache when scene list changes
