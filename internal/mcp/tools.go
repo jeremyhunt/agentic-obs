@@ -132,6 +132,7 @@ type CreateTextSourceInput struct {
 	FontName   string `json:"font_name,omitempty" jsonschema:"Font face name (default: Arial)"`
 	FontSize   int    `json:"font_size,omitempty" jsonschema:"Font size in points (default: 36)"`
 	Color      int64  `json:"color,omitempty" jsonschema:"Text color as ABGR integer (default: white)"`
+	IfExists   string `json:"if_exists,omitempty" jsonschema:"What to do if the source already exists: error (default), update, or skip"`
 }
 
 // CreateImageSourceInput is the input for creating an image source
@@ -139,6 +140,7 @@ type CreateImageSourceInput struct {
 	SceneName  string `json:"scene_name" jsonschema:"Name of the scene to add the source to"`
 	SourceName string `json:"source_name" jsonschema:"Name for the new image source"`
 	FilePath   string `json:"file_path" jsonschema:"Path to the image file"`
+	IfExists   string `json:"if_exists,omitempty" jsonschema:"What to do if the source already exists: error (default), update, or skip"`
 }
 
 // CreateColorSourceInput is the input for creating a color source
@@ -148,6 +150,7 @@ type CreateColorSourceInput struct {
 	Color      int64  `json:"color" jsonschema:"Color as ABGR integer (e.g., 0xFF0000FF for red)"`
 	Width      int    `json:"width,omitempty" jsonschema:"Width in pixels (default: 1920)"`
 	Height     int    `json:"height,omitempty" jsonschema:"Height in pixels (default: 1080)"`
+	IfExists   string `json:"if_exists,omitempty" jsonschema:"What to do if the source already exists: error (default), update, or skip"`
 }
 
 // CreateBrowserSourceInput is the input for creating a browser source
@@ -158,6 +161,30 @@ type CreateBrowserSourceInput struct {
 	Width      int    `json:"width,omitempty" jsonschema:"Browser width in pixels (default: 800)"`
 	Height     int    `json:"height,omitempty" jsonschema:"Browser height in pixels (default: 600)"`
 	FPS        int    `json:"fps,omitempty" jsonschema:"Frame rate (default: 30)"`
+
+	// CSS is injected into the page. OBS ships a default that hides scrollbars
+	// and makes the background transparent, which is almost always what an
+	// overlay wants -- so this is only set when supplied, rather than defaulted
+	// to empty and silently removing it.
+	CSS string `json:"css,omitempty" jsonschema:"Custom CSS injected into the page; omit to keep OBS's default"`
+
+	// IsLocalFile switches url to a local path. Kept explicit because a local
+	// file and a URL are different settings keys in OBS, not one field that
+	// accepts either.
+	IsLocalFile bool `json:"is_local_file,omitempty" jsonschema:"Treat the url as a local file path"`
+
+	// Shutdown frees the browser when the source is not visible. Saves memory,
+	// at the cost of losing page state on every hide.
+	Shutdown *bool `json:"shutdown,omitempty" jsonschema:"Shut the page down when the source is hidden"`
+
+	// RestartWhenActive reloads the page every time the source becomes visible.
+	//
+	// A pointer so it can be left alone. Turning it on breaks any overlay
+	// holding a connection across scene switches -- obs_wire.py depends on it
+	// staying off for exactly that reason -- so it is never defaulted, only set
+	// when a caller asks. (FB-72)
+	RestartWhenActive *bool `json:"restart_when_active,omitempty" jsonschema:"Reload the page each time the source becomes visible; breaks overlays that hold a connection"`
+	IfExists   string `json:"if_exists,omitempty" jsonschema:"What to do if the source already exists: error (default), update, or skip"`
 }
 
 // CreateMediaSourceInput is the input for creating a media/video source
@@ -166,6 +193,7 @@ type CreateMediaSourceInput struct {
 	SourceName string `json:"source_name" jsonschema:"Name for the new media source"`
 	FilePath   string `json:"file_path" jsonschema:"Path to the media file"`
 	Loop       bool   `json:"loop,omitempty" jsonschema:"Whether to loop the media (default: false)"`
+	IfExists   string `json:"if_exists,omitempty" jsonschema:"What to do if the source already exists: error (default), update, or skip"`
 }
 
 // SetSourceTransformInput is the input for setting source transform properties
@@ -2005,7 +2033,8 @@ func (s *Server) handleCreateTextSource(ctx context.Context, request *mcpsdk.Cal
 	}
 
 	// Create the input using the generic method
-	sceneItemID, err := s.obsClient.CreateInput(input.SceneName, input.SourceName, "text_gdiplus_v3", settings)
+	action, sceneItemID, err := s.createTypedSource(
+		input.SceneName, input.SourceName, "text_gdiplus_v3", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_text_source", "Create text source", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to create text source: %w", err)
@@ -2015,6 +2044,7 @@ func (s *Server) handleCreateTextSource(ctx context.Context, request *mcpsdk.Cal
 		"scene_name":    input.SceneName,
 		"source_name":   input.SourceName,
 		"scene_item_id": sceneItemID,
+		"action":        action,
 		"message":       fmt.Sprintf("Successfully created text source '%s' in scene '%s'", input.SourceName, input.SceneName),
 	}
 	s.recordAction("create_text_source", "Create text source", input, result, true, time.Since(start))
@@ -2030,7 +2060,8 @@ func (s *Server) handleCreateImageSource(ctx context.Context, request *mcpsdk.Ca
 		"file": input.FilePath,
 	}
 
-	sceneItemID, err := s.obsClient.CreateInput(input.SceneName, input.SourceName, "image_source", settings)
+	action, sceneItemID, err := s.createTypedSource(
+		input.SceneName, input.SourceName, "image_source", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_image_source", "Create image source", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to create image source: %w", err)
@@ -2040,6 +2071,7 @@ func (s *Server) handleCreateImageSource(ctx context.Context, request *mcpsdk.Ca
 		"scene_name":    input.SceneName,
 		"source_name":   input.SourceName,
 		"scene_item_id": sceneItemID,
+		"action":        action,
 		"file_path":     input.FilePath,
 		"message":       fmt.Sprintf("Successfully created image source '%s' in scene '%s'", input.SourceName, input.SceneName),
 	}
@@ -2068,7 +2100,8 @@ func (s *Server) handleCreateColorSource(ctx context.Context, request *mcpsdk.Ca
 		"height": height,
 	}
 
-	sceneItemID, err := s.obsClient.CreateInput(input.SceneName, input.SourceName, "color_source_v3", settings)
+	action, sceneItemID, err := s.createTypedSource(
+		input.SceneName, input.SourceName, "color_source_v3", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_color_source", "Create color source", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to create color source: %w", err)
@@ -2078,6 +2111,7 @@ func (s *Server) handleCreateColorSource(ctx context.Context, request *mcpsdk.Ca
 		"scene_name":    input.SceneName,
 		"source_name":   input.SourceName,
 		"scene_item_id": sceneItemID,
+		"action":        action,
 		"width":         width,
 		"height":        height,
 		"message":       fmt.Sprintf("Successfully created color source '%s' in scene '%s'", input.SourceName, input.SceneName),
@@ -2112,7 +2146,24 @@ func (s *Server) handleCreateBrowserSource(ctx context.Context, request *mcpsdk.
 		"fps":    fps,
 	}
 
-	sceneItemID, err := s.obsClient.CreateInput(input.SceneName, input.SourceName, "browser_source", settings)
+	// Only keys the caller actually supplied. Sending a zero value for each is
+	// how OBS's own defaults get wiped -- the empty-css case in particular
+	// removes the transparent-background stylesheet an overlay relies on.
+	if input.CSS != "" {
+		settings["css"] = input.CSS
+	}
+	if input.IsLocalFile {
+		settings["is_local_file"] = true
+	}
+	if input.Shutdown != nil {
+		settings["shutdown"] = *input.Shutdown
+	}
+	if input.RestartWhenActive != nil {
+		settings["restart_when_active"] = *input.RestartWhenActive
+	}
+
+	action, sceneItemID, err := s.createTypedSource(
+		input.SceneName, input.SourceName, "browser_source", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_browser_source", "Create browser source", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to create browser source: %w", err)
@@ -2122,6 +2173,7 @@ func (s *Server) handleCreateBrowserSource(ctx context.Context, request *mcpsdk.
 		"scene_name":    input.SceneName,
 		"source_name":   input.SourceName,
 		"scene_item_id": sceneItemID,
+		"action":        action,
 		"url":           input.URL,
 		"width":         width,
 		"height":        height,
@@ -2143,7 +2195,8 @@ func (s *Server) handleCreateMediaSource(ctx context.Context, request *mcpsdk.Ca
 		"clear_on_end": false,
 	}
 
-	sceneItemID, err := s.obsClient.CreateInput(input.SceneName, input.SourceName, "ffmpeg_source", settings)
+	action, sceneItemID, err := s.createTypedSource(
+		input.SceneName, input.SourceName, "ffmpeg_source", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_media_source", "Create media source", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to create media source: %w", err)
@@ -2153,6 +2206,7 @@ func (s *Server) handleCreateMediaSource(ctx context.Context, request *mcpsdk.Ca
 		"scene_name":    input.SceneName,
 		"source_name":   input.SourceName,
 		"scene_item_id": sceneItemID,
+		"action":        action,
 		"file_path":     input.FilePath,
 		"loop":          input.Loop,
 		"message":       fmt.Sprintf("Successfully created media source '%s' in scene '%s'", input.SourceName, input.SceneName),
