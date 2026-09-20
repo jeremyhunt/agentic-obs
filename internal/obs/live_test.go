@@ -98,13 +98,70 @@ func TestLiveClientSatisfiesContract(t *testing.T) {
 			t.Fatalf("CreateInput: %v", err)
 		}
 
+		groupName, groupItem := borrowGroup(t, client, scene)
+
 		return client, obstest.Fixture{
 			SceneName:   scene,
 			SourceName:  source,
 			SourceKind:  kind,
 			SceneItemID: itemID,
+			GroupName:   groupName,
+			GroupItemID: groupItem,
 		}
 	})
+}
+
+// borrowGroup places an existing group into the scratch scene, or returns ""
+// when the collection has none.
+//
+// The live suite cannot build its own group: obs-websocket's Scenes category
+// has CreateScene but no CreateGroup, and the group requests only read. So the
+// fixture borrows one. DuplicateSceneItem is what makes that safe -- it adds a
+// second *placement* of the same group rather than copying it, so the rows
+// mutate a scene item inside the scratch scene and the operator's own scenes
+// are never touched. Removing the scratch scene removes the borrowed placement
+// with it, and the group itself survives because another placement still
+// references it.
+func borrowGroup(t *testing.T, client *obs.Client, scratchScene string) (string, int) {
+	t.Helper()
+
+	groups, err := client.GetGroupList()
+	if err != nil {
+		t.Fatalf("GetGroupList: %v", err)
+	}
+	if len(groups) == 0 {
+		return "", 0
+	}
+	inGroups := make(map[string]bool, len(groups))
+	for _, g := range groups {
+		inGroups[g] = true
+	}
+
+	scenes, _, err := client.GetSceneList()
+	if err != nil {
+		t.Fatalf("GetSceneList: %v", err)
+	}
+	for _, name := range scenes {
+		if name == scratchScene {
+			continue
+		}
+		full, err := client.GetSceneByName(name)
+		if err != nil {
+			continue // GetSceneItemList refuses a group; skip anything that will not open
+		}
+		for _, item := range full.Sources {
+			if !inGroups[item.Name] {
+				continue
+			}
+			dup, err := client.DuplicateSceneItem(name, item.ID, scratchScene)
+			if err != nil {
+				t.Fatalf("duplicating group %q from scene %q into the scratch scene: %v",
+					item.Name, name, err)
+			}
+			return item.Name, dup
+		}
+	}
+	return "", 0
 }
 
 // recordingSink collects translated events for the live event test.

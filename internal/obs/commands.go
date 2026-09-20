@@ -37,6 +37,12 @@ type SceneSource struct {
 	Rotation float64 `json:"rotation"`
 	Visible  bool    `json:"visible"`
 	Locked   bool    `json:"locked"`
+
+	// IsGroup separates a group from a nested scene. Both report Type
+	// "OBS_SOURCE_TYPE_SCENE", because groups in OBS are scenes wearing a flag,
+	// so this is the only field that tells them apart -- and they need
+	// different requests to read their contents.
+	IsGroup bool `json:"is_group"`
 }
 
 // RecordingStatus represents the current recording state.
@@ -112,6 +118,54 @@ func (c *Client) GetSceneByName(name string) (*Scene, error) {
 // It is a free function rather than inline in GetSceneByName so it can be tested
 // without a websocket connection: the conversion is where fields get dropped,
 // and nothing that needs a live OBS to exercise will be covered in CI.
+// GetGroupList returns the names of every group.
+//
+// Groups are absent from GetSceneList and from GetInputList, so without this
+// call a group is invisible to anything enumerating a collection even though it
+// is placed in scenes like any other source.
+func (c *Client) GetGroupList() ([]string, error) {
+	client, err := c.getClient()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Scenes.GetGroupList()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list groups: %w", err)
+	}
+	if resp.Groups == nil {
+		return []string{}, nil
+	}
+	return resp.Groups, nil
+}
+
+// GetGroupSceneItemList returns the items inside a group.
+//
+// This is not interchangeable with GetSceneByName. obs-websocket refuses each
+// call for the other's argument with InvalidResourceType (602) -- "The
+// specified source is not a scene. (Is group)" and "The specified source is not
+// a group. (Is scene)" -- so a caller walking a collection must dispatch on
+// SceneSource.IsGroup rather than try one and fall back to the other.
+func (c *Client) GetGroupSceneItemList(groupName string) ([]SceneSource, error) {
+	client, err := c.getClient()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.SceneItems.GetGroupSceneItemList(&sceneitems.GetGroupSceneItemListParams{
+		SceneName: &groupName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list items in group '%s': %w", groupName, err)
+	}
+
+	out := make([]SceneSource, 0, len(resp.SceneItems))
+	for _, item := range resp.SceneItems {
+		out = append(out, sceneSourceFromItem(*item))
+	}
+	return out, nil
+}
+
 func sceneSourceFromItem(item typedefs.SceneItem) SceneSource {
 	source := SceneSource{
 		ID:      int(item.SceneItemID),
@@ -124,6 +178,11 @@ func sceneSourceFromItem(item typedefs.SceneItem) SceneSource {
 		// obs://scene/{name} resource publishes it as. It was never populated,
 		// which made that resource report every source as hidden. (FB-60)
 		Visible: item.SceneItemEnabled,
+		// A group and a nested scene both report SourceType
+		// "OBS_SOURCE_TYPE_SCENE", so this flag is the only thing that tells a
+		// caller which of the two it is holding -- and they need different
+		// requests to read their contents.
+		IsGroup: item.IsGroup,
 	}
 
 	// Extract transform information (always available as a struct)

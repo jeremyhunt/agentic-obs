@@ -2,6 +2,7 @@ package obstest
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/andreykaipov/goobs/api/typedefs"
@@ -31,6 +32,11 @@ type world struct {
 
 type scene struct {
 	items []*sceneItem
+	// A group is a scene with a flag, which is exactly how libobs stores one --
+	// obs-websocket's own words are "groups in OBS are actually scenes, but
+	// renamed and modified". Modelling it as a separate kind of thing would
+	// make the fake disagree with OBS about what a group can do.
+	isGroup bool
 	// libobs: "a scene is a source which contains and renders other sources
 	// using specific transforms and/or filtering" (reference-scenes.rst). So a
 	// scene carries filters exactly as an input does, which is why
@@ -159,29 +165,14 @@ func (f *Fake) GetSceneByName(name string) (*obs.Scene, error) {
 	if !ok {
 		return nil, fmt.Errorf("scene %q not found", name)
 	}
-
-	out := &obs.Scene{Name: name, Sources: make([]obs.SceneSource, 0, len(sc.items))}
-	for _, it := range sc.items {
-		kind := ""
-		if in, ok := f.world.inputs[it.source]; ok {
-			kind = in.kind
-		}
-		out.Sources = append(out.Sources, obs.SceneSource{
-			ID:       it.id,
-			Name:     it.source,
-			Type:     kind,
-			Enabled:  it.enabled,
-			Visible:  it.enabled,
-			Locked:   it.locked,
-			X:        it.transform.PositionX,
-			Y:        it.transform.PositionY,
-			Width:    it.transform.Width,
-			Height:   it.transform.Height,
-			ScaleX:   it.transform.ScaleX,
-			ScaleY:   it.transform.ScaleY,
-			Rotation: it.transform.Rotation,
-		})
+	// obs-websocket answers InvalidResourceType (602) here rather than listing
+	// the group's contents: "The specified source is not a scene. (Is group)".
+	// The two calls are exclusive in both directions.
+	if sc.isGroup {
+		return nil, fmt.Errorf("the specified source is not a scene. (is group): %q", name)
 	}
+
+	out := &obs.Scene{Name: name, Sources: f.renderItems(sc)}
 	return out, nil
 }
 
@@ -321,6 +312,91 @@ func (f *Fake) sourceExists(name string) bool {
 	}
 	_, ok := f.world.scenes[name]
 	return ok
+}
+
+// CreateGroup adds an empty group. Like CreateScene it is not part of the
+// contract interface: obs-websocket has no CreateGroup request at all, so this
+// exists only so the fake can offer the fixture a group the live side has to
+// find rather than make.
+func (f *Fake) CreateGroup(name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if _, exists := f.world.scenes[name]; exists {
+		return fmt.Errorf("resource already exists: %q", name)
+	}
+	f.world.scenes[name] = &scene{isGroup: true}
+	return nil
+}
+
+func (f *Fake) GetGroupList() ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	out := []string{}
+	for name, sc := range f.world.scenes {
+		if sc.isGroup {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (f *Fake) GetGroupSceneItemList(groupName string) ([]obs.SceneSource, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	sc, ok := f.world.scenes[groupName]
+	if !ok {
+		return nil, fmt.Errorf("group %q not found", groupName)
+	}
+	if !sc.isGroup {
+		return nil, fmt.Errorf("the specified source is not a group. (is scene): %q", groupName)
+	}
+	return f.renderItems(sc), nil
+}
+
+// renderItems turns a container's placements into the shape both
+// GetSceneByName and GetGroupSceneItemList return.
+//
+// Type carries OBS's source-type vocabulary, not the input kind: the real
+// client reads it from sceneItem.sourceType, so a fake that put the kind there
+// would quietly disagree with OBS about what obs://scene/{name} publishes.
+func (f *Fake) renderItems(sc *scene) []obs.SceneSource {
+	out := make([]obs.SceneSource, 0, len(sc.items))
+	for _, it := range sc.items {
+		sourceType, isGroup := f.sourceTypeOf(it.source)
+		out = append(out, obs.SceneSource{
+			ID:       it.id,
+			Name:     it.source,
+			Type:     sourceType,
+			IsGroup:  isGroup,
+			Enabled:  it.enabled,
+			Visible:  it.enabled,
+			Locked:   it.locked,
+			X:        it.transform.PositionX,
+			Y:        it.transform.PositionY,
+			Width:    it.transform.Width,
+			Height:   it.transform.Height,
+			ScaleX:   it.transform.ScaleX,
+			ScaleY:   it.transform.ScaleY,
+			Rotation: it.transform.Rotation,
+		})
+	}
+	return out
+}
+
+// sourceTypeOf reports how OBS types a placed source. A group and a nested
+// scene are both OBS_SOURCE_TYPE_SCENE -- only isGroup separates them.
+func (f *Fake) sourceTypeOf(name string) (sourceType string, isGroup bool) {
+	if sc, ok := f.world.scenes[name]; ok {
+		return "OBS_SOURCE_TYPE_SCENE", sc.isGroup
+	}
+	if _, ok := f.world.inputs[name]; ok {
+		return "OBS_SOURCE_TYPE_INPUT", false
+	}
+	return "", false
 }
 
 // copySettings defends the stored map from a caller that keeps mutating the one
