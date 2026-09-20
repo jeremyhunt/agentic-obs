@@ -1,6 +1,7 @@
 package obs
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/andreykaipov/goobs/api/typedefs"
@@ -35,6 +36,12 @@ func TestSceneSourceFromItemCarriesVisibility(t *testing.T) {
 // field. It sets everything to a distinct non-zero value, so a field left behind
 // in the conversion shows up as a zero the test names -- rather than waiting for
 // someone to notice the resource is wrong.
+//
+// It walks SceneSource by reflection rather than listing the fields. The list
+// version did not do what this comment claims: IsGroup was added to the struct
+// and left out of the conversion, and this test passed, because a hand-written
+// list only guards the fields someone remembered to add to it. A reflective
+// walk fails the moment a new field is not carried, which is the whole point.
 func TestSceneSourceFromItemCopiesEveryField(t *testing.T) {
 	got := sceneSourceFromItem(typedefs.SceneItem{
 		SceneItemID:      42,
@@ -42,6 +49,7 @@ func TestSceneSourceFromItemCopiesEveryField(t *testing.T) {
 		SourceType:       "OBS_SOURCE_TYPE_INPUT",
 		SceneItemEnabled: true,
 		SceneItemLocked:  true,
+		IsGroup:          true,
 		SceneItemTransform: typedefs.SceneItemTransform{
 			PositionX: 120, PositionY: 80,
 			Width: 1920, Height: 1080,
@@ -49,6 +57,17 @@ func TestSceneSourceFromItemCopiesEveryField(t *testing.T) {
 			Rotation: 45,
 		},
 	})
+
+	// Every input above is non-zero, so every field of the result must be too.
+	// A zero here means the conversion dropped it.
+	v := reflect.ValueOf(got)
+	for i := 0; i < v.NumField(); i++ {
+		if v.Field(i).IsZero() {
+			t.Errorf("%s is the zero value; sceneSourceFromItem dropped it, and every "+
+				"field of the scene item it was built from was set",
+				v.Type().Field(i).Name)
+		}
+	}
 
 	checks := []struct {
 		field string
@@ -68,6 +87,7 @@ func TestSceneSourceFromItemCopiesEveryField(t *testing.T) {
 		{"ScaleX", got.ScaleX, 1.5},
 		{"ScaleY", got.ScaleY, 2.5},
 		{"Rotation", got.Rotation, 45.0},
+		{"IsGroup", got.IsGroup, true},
 	}
 	for _, c := range checks {
 		if c.got != c.want {

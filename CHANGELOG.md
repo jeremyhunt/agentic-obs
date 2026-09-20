@@ -7,6 +7,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Groups are a distinct kind of container, and are now visible as one
+  (FB-80)** — `GetGroupList` and `GetGroupSceneItemList` on the client,
+  `SceneSource.IsGroup` populated, `is_group` published on `obs://scene/{name}`,
+  and three contract rows. The live collection has **eight groups in ten
+  placements**, so this is not a hypothetical: a capture that mishandled a group
+  would mishandle half the containers on the main canvas.
+
+  The trap is that a group and a nested scene are identical in the field most
+  code would branch on. Both report `sourceType: OBS_SOURCE_TYPE_SCENE`, because
+  "groups in OBS are actually scenes, but renamed and modified" — `GetGroupList`'s
+  own documentation — and only `isGroup` separates them. Getting it wrong is not
+  cosmetic, because **the two list calls refuse each other's arguments** rather
+  than degrading: `GetSceneItemList` on a group answers `InvalidResourceType`
+  (602) *"The specified source is not a scene. (Is group)"*, and
+  `GetGroupSceneItemList` on a scene answers *"The specified source is not a
+  group. (Is scene)"*. Neither is a superset of the other, so a walker has to
+  dispatch on `isGroup` instead of trying one and falling back. A group is
+  likewise not an input, and is absent from both `GetSceneList` and
+  `GetInputList` — so before this, a group was invisible to anything enumerating
+  a collection while still being placed in scenes like any other source.
+
+  The FB-64 bounds trap reaches groups too, confirmed against a real one: reading
+  `MERCH`'s transform and writing it straight back is refused with
+  `RequestFieldOutOfRange` (402) on `boundsWidth`. `NormaliseBounds` already
+  covers it, and a row now says so.
+
+  The live suite cannot build this fixture — obs-websocket has `CreateScene` and
+  no `CreateGroup` — so it **borrows** a group by duplicating an existing
+  placement into its scratch scene. A duplicate references the group rather than
+  copying it, so the rows mutate only the scratch placement and the operator's
+  scenes are untouched. Rows skip, visibly, when a collection has no group.
+
+### Fixed
+- **`SceneSource.Type` meant different things in the fake and the client
+  (FB-80)** — the fake put the *input kind* there while the client puts OBS's
+  source-type vocabulary there, which is what `obs://scene/{name}` publishes. The
+  fake now reports `OBS_SOURCE_TYPE_INPUT` / `OBS_SOURCE_TYPE_SCENE` as OBS does.
+- **The guard against dropped conversion fields did not guard (FB-80)** —
+  `TestSceneSourceFromItemCopiesEveryField` describes itself as "the guard
+  against the next dropped field", but it compared a hand-written list, so it
+  only ever covered fields someone remembered to add to it. `IsGroup` was added
+  to `SceneSource`, left out of `sceneSourceFromItem`, and the test passed. It
+  now walks the struct by reflection and fails on any field left zero.
+
 - **Nested scenes are modelled, not assumed (FB-79)** — four contract rows for a
   scene placed inside another scene, which is the shape the live collection is
   actually built from: all ten of its containers are nested scenes, not groups,

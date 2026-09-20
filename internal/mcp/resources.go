@@ -308,6 +308,7 @@ func convertSourcesToMap(sources []obs.SceneSource) []map[string]interface{} {
 			"id":       src.ID,
 			"name":     src.Name,
 			"type":     src.Type,
+			"is_group": src.IsGroup,
 			"enabled":  src.Enabled,
 			"visible":  src.Visible,
 			"locked":   src.Locked,

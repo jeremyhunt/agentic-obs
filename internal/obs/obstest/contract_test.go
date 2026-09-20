@@ -25,6 +25,26 @@ func TestFakeSatisfiesContract(t *testing.T) {
 			t.Fatalf("CreateInput: %v", err)
 		}
 
-		return f, Fixture{SceneName: scene, SourceName: source, SourceKind: kind, SceneItemID: id}
+		// A group placed in the same scene. The live harness cannot do this --
+		// obs-websocket has no CreateGroup -- so it duplicates an existing
+		// group's placement instead, and skips the group rows when the
+		// collection has none.
+		const group = "Contract Group"
+		if err := f.CreateGroup(group); err != nil {
+			t.Fatalf("CreateGroup: %v", err)
+		}
+		groupItem, err := f.CreateSceneItem(scene, group, true)
+		if err != nil {
+			t.Fatalf("CreateSceneItem for the group: %v", err)
+		}
+
+		return f, Fixture{
+			SceneName:   scene,
+			SourceName:  source,
+			SourceKind:  kind,
+			SceneItemID: id,
+			GroupName:   group,
+			GroupItemID: groupItem,
+		}
 	})
 }

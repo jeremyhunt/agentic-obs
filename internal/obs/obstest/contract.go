@@ -69,6 +69,15 @@ type FilterClient interface {
 	RemoveSourceFilter(sourceName, filterName string) error
 }
 
+// GroupClient covers groups. A group is neither a scene nor an input, and
+// obs-websocket refuses the wrong request for each with InvalidResourceType
+// (602) rather than degrading, so the dispatch has to be right before anything
+// walks a collection.
+type GroupClient interface {
+	GetGroupList() ([]string, error)
+	GetGroupSceneItemList(groupName string) ([]obs.SceneSource, error)
+}
+
 // ContractClient is everything the contract exercises.
 type ContractClient interface {
 	SceneItemClient
@@ -77,6 +86,29 @@ type ContractClient interface {
 	AudioClient
 	CanvasClient
 	FilterClient
+	GroupClient
+}
+
+// requireGroup skips a row when the environment has no group.
+//
+// A skip is visible in the test output and a silent pass is not, which matters
+// because the live side cannot create a group and so can only run these rows
+// when the operator's collection already has one.
+func requireGroup(t *testing.T, fx Fixture) {
+	t.Helper()
+	if fx.GroupName == "" {
+		t.Skip("no group in this environment: obs-websocket cannot create one, " +
+			"so this row needs a collection that already contains a group")
+	}
+}
+
+func containsString(haystack []string, want string) bool {
+	for _, got := range haystack {
+		if got == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Fixture names a scene, and one input placed in it, that the contract may
@@ -86,6 +118,19 @@ type Fixture struct {
 	SourceName  string
 	SourceKind  string
 	SceneItemID int
+
+	// GroupName is a group placed in SceneName as GroupItemID, or "" when the
+	// environment has no group to offer.
+	//
+	// It is optional because **obs-websocket cannot create a group**: the Scenes
+	// category has CreateScene but no CreateGroup, and GetGroupList /
+	// GetGroupSceneItemList only read. So the fake builds one, while the live
+	// harness has to find an existing group and duplicate its placement into the
+	// scratch scene. Rows that need a group skip when this is empty rather than
+	// failing, because a collection with no groups is a legitimate state -- and
+	// say so, so a skip is never mistaken for coverage.
+	GroupName   string
+	GroupItemID int
 }
 
 // NewClient builds a client and a fixture for one contract row. Each row gets a
@@ -547,6 +592,116 @@ func RunContract(t *testing.T, newClient NewClient) {
 		if !found {
 			t.Errorf("filter %q is not listed on scene %q; the filter list holds %d entries",
 				filterName, fx.SceneName, len(filters))
+		}
+	})
+	// Groups. The collection this project drives holds eight of them, so they
+	// are not a hypothetical: a capture that mishandles a group mishandles half
+	// the containers on the main canvas.
+	//
+	// The trap is that a group and a nested scene are indistinguishable by the
+	// field most code would branch on. Both report
+	// sourceType OBS_SOURCE_TYPE_SCENE, because "groups in OBS are actually
+	// scenes, but renamed and modified" (GetGroupList's own documentation).
+	// Only isGroup separates them.
+	t.Run("a group and a nested scene are told apart by isGroup, not by type", func(t *testing.T) {
+		client, fx := newClient(t)
+		requireGroup(t, fx)
+
+		scene, err := client.GetSceneByName(fx.SceneName)
+		if err != nil {
+			t.Fatalf("GetSceneByName: %v", err)
+		}
+		item := findSource(scene, fx.GroupItemID)
+		if item == nil {
+			t.Fatalf("group placement %d is not listed in scene %q; scene holds %v",
+				fx.GroupItemID, fx.SceneName, sourceIDs(scene))
+		}
+
+		if !item.IsGroup {
+			t.Errorf("group %q reports IsGroup=false. Nothing else distinguishes it: "+
+				"a group and a nested scene both report type %q, so code that "+
+				"branches on type alone will send a group down the scene path",
+				fx.GroupName, item.Type)
+		}
+
+		// The two list calls are exclusive in both directions, and each refuses
+		// the other's argument rather than returning something usable.
+		if _, err := client.GetSceneByName(fx.GroupName); err == nil {
+			t.Errorf("GetSceneItemList accepted group %q; obs-websocket answers "+
+				"InvalidResourceType (602) \"The specified source is not a scene. "+
+				"(Is group)\", so a walker must dispatch on isGroup rather than try "+
+				"one call and fall back", fx.GroupName)
+		}
+		if _, err := client.GetGroupSceneItemList(fx.SceneName); err == nil {
+			t.Errorf("GetGroupSceneItemList accepted scene %q; it answers "+
+				"InvalidResourceType (602) \"The specified source is not a group. "+
+				"(Is scene)\"", fx.SceneName)
+		}
+
+		// And the group's own contents are reachable through the group call.
+		if _, err := client.GetGroupSceneItemList(fx.GroupName); err != nil {
+			t.Errorf("GetGroupSceneItemList on group %q: %v", fx.GroupName, err)
+		}
+	})
+	t.Run("a group is listed as a group and not as a scene or an input", func(t *testing.T) {
+		client, fx := newClient(t)
+		requireGroup(t, fx)
+
+		groups, err := client.GetGroupList()
+		if err != nil {
+			t.Fatalf("GetGroupList: %v", err)
+		}
+		if !containsString(groups, fx.GroupName) {
+			t.Errorf("group %q is missing from GetGroupList, which holds %v", fx.GroupName, groups)
+		}
+
+		// A capture that enumerated scenes and inputs would never see it.
+		inputs, err := client.ListSources()
+		if err != nil {
+			t.Fatalf("ListSources: %v", err)
+		}
+		if containsInput(inputs, fx.GroupName) {
+			t.Errorf("group %q is listed as an input; GetInputSettings answers "+
+				"InvalidResourceType (602) \"The specified source is not an input.\" "+
+				"for it, so a spec that captured it as one could not apply it back",
+				fx.GroupName)
+		}
+		if _, err := client.GetSourceSettings(fx.GroupName); err == nil {
+			t.Errorf("GetSourceSettings returned settings for group %q; a group has "+
+				"no input settings", fx.GroupName)
+		}
+	})
+	t.Run("a group placement's transform round-trips", func(t *testing.T) {
+		client, fx := newClient(t)
+		requireGroup(t, fx)
+
+		// The FB-64 trap reaches groups, and this is not theoretical: reading
+		// the transform of a real group placement in the live collection and
+		// writing it straight back is refused by obs-websocket with
+		// RequestFieldOutOfRange (402) on boundsWidth, because OBS reports zero
+		// bounds for a placement that never had a bounding box.
+		//
+		// NormaliseBounds is what makes it writable, and this row is what says
+		// the same fix has to cover a group and not only an input.
+		got, err := client.GetSceneItemTransform(fx.SceneName, fx.GroupItemID)
+		if err != nil {
+			t.Fatalf("GetSceneItemTransform on a group placement: %v", err)
+		}
+		if err := client.SetSceneItemTransform(fx.SceneName, fx.GroupItemID, got); err != nil {
+			t.Fatalf("a transform read straight off a group placement was rejected on "+
+				"write: %v\ntransform was %+v", err, got)
+		}
+
+		got.PositionX = 64
+		if err := client.SetSceneItemTransform(fx.SceneName, fx.GroupItemID, got); err != nil {
+			t.Fatalf("SetSceneItemTransform on a group placement: %v", err)
+		}
+		back, err := client.GetSceneItemTransform(fx.SceneName, fx.GroupItemID)
+		if err != nil {
+			t.Fatalf("GetSceneItemTransform: %v", err)
+		}
+		if back.PositionX != 64 {
+			t.Errorf("group placement sits at x=%v after being moved to 64", back.PositionX)
 		}
 	})
 	t.Run("the canvas is reported with usable dimensions", func(t *testing.T) {
