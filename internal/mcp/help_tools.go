@@ -757,6 +757,43 @@ is what you write back with set_source_settings.`,
   "count": 1
 }`,
 
+	"take_screenshot": `# take_screenshot
+
+**Category**: Visual
+
+**Description**: Capture a source or scene now and return the image in the same
+turn, so you can look at the result of a change immediately.
+
+**Input**:
+- source_name (string, required): Source or scene to capture
+- format (string, optional): png (default), jpg, bmp, webp. The set varies by OBS
+  build; get_obs_status reports it as supported_image_formats
+- width (int, optional): Resize width; omit for the source's own size
+- height (int, optional): Resize height; omit for the source's own size
+- quality (int, optional): Compression quality 1-100, for jpg
+- save_path (string, optional): Also write the image to this path
+
+**Output**: The image itself, plus source_name, format, bytes, and saved_to when
+a path was given.
+
+**Example Input**:
+{
+  "source_name": "Starting Soon",
+  "width": 1280
+}
+
+**Use Case**: The verify step of a visual loop -- place or resize something, take
+a screenshot, look at it, adjust. This is the difference between reasoning about
+coordinates and seeing where they put things.
+
+**Versus the screenshot sources**: create_screenshot_source sets up a standing
+capture on a cadence, which suits monitoring. take_screenshot is a single shot
+with no source created and nothing stored; prefer it for checking your own work.
+
+**Note on size**: a full-resolution PNG of a 2560x1440 canvas is large. Pass
+width to scale it down when you only need to check placement -- the layout is
+just as legible at 1280 and costs a quarter as much.`,
+
 	"configure_screenshot_cadence": `# configure_screenshot_cadence
 
 **Category**: Visual - Screenshot Monitoring

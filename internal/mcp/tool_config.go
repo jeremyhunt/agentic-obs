@@ -65,7 +65,7 @@ var toolGroupMetadata = map[string]*ToolGroupMetadata{
 	"Visual": {
 		Name:        "Visual",
 		Description: "Visual monitoring: screenshot capture sources for AI visual analysis",
-		ToolNames:   []string{"create_screenshot_source", "remove_screenshot_source", "list_screenshot_sources", "configure_screenshot_cadence"},
+		ToolNames:   []string{"create_screenshot_source", "remove_screenshot_source", "list_screenshot_sources", "configure_screenshot_cadence", "take_screenshot"},
 	},
 	"Design": {
 		Name:        "Design",
