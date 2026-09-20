@@ -491,6 +491,14 @@ func (s *Server) registerToolHandlers() {
 
 		mcpsdk.AddTool(s.mcpServer,
 			&mcpsdk.Tool{
+				Name:        "apply_scene_spec",
+				Description: "Reconcile a scene to a captured spec: create what is missing, write back what drifted, and leave alone what the spec does not describe. Defaults to a dry run; pass dry_run=false to write. Returns the scene as it was, so the apply can be undone",
+			},
+			s.handleApplySceneSpec,
+		)
+
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
 				Name:        "diff_scene_spec",
 				Description: "Compare a captured scene spec against the live scene and report what differs, classified as drift, missing, unmanaged, kind_mismatch or renamed. A read-only dry run of what an apply would do",
 			},

@@ -46,6 +46,24 @@ type scene struct {
 	filters []*filter
 }
 
+// newSceneItem creates a placement in the state OBS gives a fresh one.
+//
+// BoundsType matters: obs-websocket never reports an empty one, it reports
+// OBS_BOUNDS_NONE for an item that has no bounding box. A fake that left it
+// empty would let a capture record "" and then disagree with itself after an
+// apply, because the client normalises "" to OBS_BOUNDS_NONE on the way out --
+// which is exactly what FB-64 added it to do.
+func newSceneItem(id int, source string, enabled bool) *sceneItem {
+	return &sceneItem{
+		id:      id,
+		source:  source,
+		enabled: enabled,
+		transform: obs.SceneItemTransform{
+			BoundsType: obs.BoundsNone,
+		},
+	}
+}
+
 // sceneItem is one placement of an input in a scene. Its transform and enabled
 // flag live together, so there is no way for two accessors to disagree.
 type sceneItem struct {
@@ -133,7 +151,7 @@ func (f *Fake) CreateInput(sceneName, sourceName, inputKind string, settings map
 	f.world.inputs[sourceName] = &input{name: sourceName, kind: inputKind, settings: settings}
 
 	f.world.nextID++
-	it := &sceneItem{id: f.world.nextID, source: sourceName, enabled: true}
+	it := newSceneItem(f.world.nextID, sourceName, true)
 	sc.items = append(sc.items, it)
 
 	return it.id, nil
@@ -329,6 +347,30 @@ func (f *Fake) CreateGroup(name string) error {
 	}
 	f.world.scenes[name] = &scene{isGroup: true}
 	return nil
+}
+
+// GetSceneList returns the scenes, and the current one.
+//
+// Groups are excluded: obs-websocket keeps them in GetGroupList and a group is
+// absent from GetSceneList, which is how a caller tells which of the two a
+// container is without asking about any placement.
+func (f *Fake) GetSceneList() ([]string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	out := []string{}
+	for name, sc := range f.world.scenes {
+		if !sc.isGroup {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+
+	current := ""
+	if len(out) > 0 {
+		current = out[0]
+	}
+	return out, current, nil
 }
 
 func (f *Fake) GetGroupList() ([]string, error) {
@@ -807,10 +849,26 @@ func (f *Fake) CreateSceneItem(sceneName, sourceName string, enabled bool) (int,
 	}
 
 	f.world.nextID++
-	it := &sceneItem{id: f.world.nextID, source: sourceName, enabled: enabled}
+	it := newSceneItem(f.world.nextID, sourceName, enabled)
 	sc.items = append(sc.items, it)
 
 	return it.id, nil
+}
+
+// SetSceneItemLocked locks or unlocks a placement.
+//
+// The fake stores locked but had no setter, which only mattered once something
+// tried to reconcile a scene rather than read one.
+func (f *Fake) SetSceneItemLocked(sceneName string, sceneItemID int, locked bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	it, err := f.findItem(sceneName, sceneItemID)
+	if err != nil {
+		return err
+	}
+	it.locked = locked
+	return nil
 }
 
 // SetSceneItemIndex moves a placement to a position in its container.

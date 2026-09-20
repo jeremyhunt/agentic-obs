@@ -69,8 +69,11 @@ test-coverage:
 ## scene; it touches nothing else.
 ##
 ##   OBS_LIVE_TEST=1 make test-live
+## -p 1 because every live package talks to the same OBS. Built in parallel
+## and run concurrently, one suite's scratch scenes appear and vanish while
+## another is enumerating the collection.
 test-live:
-	$(GOTEST) -tags obslive -v ./internal/obs/...
+	$(GOTEST) -tags obslive -v -p 1 ./internal/obs/... ./internal/scenespec/...
 
 test-race:
 	CGO_ENABLED=1 $(GOTEST) -v -race ./...
