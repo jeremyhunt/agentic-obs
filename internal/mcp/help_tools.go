@@ -2035,13 +2035,38 @@ just as legible at 1280 and costs a quarter as much.`,
 recording_stopped, recording_paused, recording_resumed, recording_file_changed,
 streaming_started, streaming_stopped, virtual_cam_started, virtual_cam_stopped,
 replay_buffer_saved, input_mute_changed, source_visibility_changed,
-transition_started, studio_mode_changed
+transition_started, studio_mode_changed, preview_scene_changed,
+vendor_event
 
 **Action types**: set_scene, toggle_mute, set_mute, set_volume, toggle_visibility,
 set_visibility, start_recording, stop_recording, pause_recording, resume_recording,
 start_streaming, stop_streaming, toggle_virtual_cam, start_virtual_cam,
 stop_virtual_cam, toggle_replay_buffer, save_replay, trigger_hotkey,
-trigger_transition, set_preview_scene, delay
+trigger_transition, set_preview_scene, delay, call_vendor_request
+
+**vendor_event and call_vendor_request**: a vendor is a third-party plugin or
+script registered with obs-websocket -- Advanced Scene Switcher, obs-browser, an
+in-OBS script. They are how a rule reaches, or is triggered by, anything
+obs-websocket does not implement itself.
+
+Filter a vendor_event trigger on vendor_name, and usually on the vendor's own
+event_type as well: one vendor emits several kinds, and a rule normally wants
+one of them. Without a vendor_name filter, any plugin emitting anything sets off
+every vendor rule.
+
+  "trigger_config": {
+    "event_type": "vendor_event",
+    "event_filter": { "vendor_name": "AdvancedSceneSwitcher", "event_type": "MacroRun" }
+  }
+
+A call_vendor_request action takes vendor_name, request_type and optional
+request_data:
+
+  { "type": "call_vendor_request",
+    "parameters": { "vendor_name": "AdvancedSceneSwitcher",
+                    "request_type": "AdvancedSceneSwitcherRunMacro",
+                    "request_data": { "macro": "PersonaShow_Sonic" } } }
+
 
 **Output**:
 - rule: The created rule

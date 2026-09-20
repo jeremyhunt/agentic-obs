@@ -35,6 +35,12 @@ const (
 	ActionTypeTriggerTransition  = "trigger_transition"
 	ActionTypeSetPreviewScene    = "set_preview_scene"
 	ActionTypeDelay              = "delay"
+
+	// ActionTypeCallVendorRequest reaches a third-party plugin. It is the only
+	// action that can do something obs-websocket does not implement itself --
+	// running an Advanced Scene Switcher macro, pushing an event into an
+	// overlay page. (FB-78)
+	ActionTypeCallVendorRequest = "call_vendor_request"
 )
 
 // ActionErrorPolicy defines what to do when an action fails.
@@ -62,6 +68,11 @@ const (
 	EventSourceVisibilityChanged = "source_visibility_changed"
 	EventTransitionStarted       = "transition_started"
 	EventStudioModeChanged       = "studio_mode_changed"
+
+	// EventVendorEvent is emitted by a third-party plugin or script. Filter on
+	// vendor_name, and usually on the vendor's own event_type too: a vendor
+	// emits several kinds and a rule normally wants one of them.
+	EventVendorEvent = "vendor_event"
 )
 
 // Rule represents an automation rule with trigger and actions.

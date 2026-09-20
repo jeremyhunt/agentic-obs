@@ -31,6 +31,9 @@ type OBSClient interface {
 	obs.StudioController
 	obs.TransitionController
 	obs.HotkeyTrigger
+	// VendorCaller is how a rule reaches a third-party plugin -- the one thing
+	// an action can do that obs-websocket does not implement itself. (FB-78)
+	obs.VendorCaller
 	obs.EventSource
 }
 
@@ -136,6 +139,9 @@ func (e *Executor) runAction(action Action) error {
 
 	case ActionTypeDelay:
 		return e.delay(action.Parameters)
+
+	case ActionTypeCallVendorRequest:
+		return e.callVendorRequest(action.Parameters)
 
 	default:
 		return fmt.Errorf("unknown action type: %s", action.Type)
@@ -343,4 +349,34 @@ func getIntParam(params map[string]interface{}, key string) (int, bool) {
 		return v, true
 	}
 	return 0, false
+}
+
+// callVendorRequest calls a request registered by a third-party plugin.
+//
+// The payload passes through untouched: a vendor's request shape is defined by
+// the plugin that registers it, so anything this layer did to it would be a
+// guess about someone else's schema. A failure fails the action rather than
+// being logged and stepped over -- a rule that continued past a failed macro
+// call would leave the operator believing it ran. (FB-78)
+func (e *Executor) callVendorRequest(params map[string]interface{}) error {
+	vendorName, ok := params["vendor_name"].(string)
+	if !ok || vendorName == "" {
+		return fmt.Errorf("call_vendor_request requires vendor_name")
+	}
+
+	requestType, ok := params["request_type"].(string)
+	if !ok || requestType == "" {
+		return fmt.Errorf("call_vendor_request requires request_type")
+	}
+
+	// Optional: plenty of vendor requests take no payload.
+	data, _ := params["request_data"].(map[string]interface{})
+	if data == nil {
+		data = map[string]interface{}{}
+	}
+
+	if _, err := e.obsClient.CallVendorRequest(vendorName, requestType, data); err != nil {
+		return fmt.Errorf("vendor request %s/%s failed: %w", vendorName, requestType, err)
+	}
+	return nil
 }
