@@ -201,6 +201,62 @@ var toolHelpContent = map[string]string{
 }`,
 
 	// Core - Status
+	"capture_scene_spec": `# capture_scene_spec
+
+**Category**: Layout
+
+**Description**: Capture a scene as a document. The spec separates what a source
+*is* from where it is *placed*, because OBS does: an input is a shared object
+and a scene item is one reference to it.
+
+That distinction is not academic. A source placed twice in one scene, or shared
+across five scenes, cannot round-trip through a flat list of placements each
+carrying its own settings -- applying it would write one source's settings
+several times, fighting itself, or drop a placement.
+
+**Input**:
+- scene_name (string, required): The scene to capture. Must be a scene, not a
+  group; a group is captured as part of whichever scene places it
+- include_settings (bool, optional, default true): Capture each input's
+  settings. Set false for a lighter document when you only want the layout
+- include_filters (bool, optional, default true): Capture filters. These attach
+  to scenes and groups as well as inputs
+
+**Output**: spec (the document), scene, source_count, item_count, and a note if
+anything was omitted.
+
+**The document**:
+- version -- schema version, so a stored spec can be migrated
+- sources[] -- each distinct source, once, whatever its placement count:
+  - type: "input", "scene" or "group"
+  - kind + settings: inputs only. A scene and a group have neither
+  - filters: all three types carry them
+  - items: a group's children. They belong to the group, so a group placed in
+    two scenes shows the same children in both
+- items[] -- the placements, in render order:
+  - source, occurrence (which placement of that source), scene_item_id
+  - order (z-order), enabled, locked, transform
+
+**Three source types, and why it matters**: a group and a nested scene both
+report sourceType OBS_SOURCE_TYPE_SCENE and are told apart only by isGroup.
+Their contents open through different requests, each refusing the other's
+argument, so a walker has to dispatch rather than try one and fall back.
+
+**Nested scenes are referenced, not expanded**: capture that scene separately.
+Expanding here would duplicate it into every spec referencing it.
+
+**Not captured** (obs-websocket cannot reach them): source private settings,
+push-to-talk/push-to-mute, source flags, and the scene-item render fields
+scale_filter, blending_method, stream_visible and recording_visible.
+
+**Examples**:
+- Full: {"scene_name": "Game"}
+- Layout only: {"scene_name": "Game", "include_settings": false}
+
+**Tip**: A spec's natural home is the git repository next to whatever builds the
+scene. It is returned inline rather than stored.
+`,
+
 	"call_obs_request": `# call_obs_request
 
 **Category**: Core

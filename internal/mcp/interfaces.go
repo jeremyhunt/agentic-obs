@@ -36,6 +36,11 @@ type OBSClient interface {
 	obs.AdvancedSceneSwitcherController
 	obs.VendorCaller
 	obs.RawRequester
+
+	// The scene spec capture reads through its own narrow interface; this
+	// keeps OBSClient a superset of it, so the composition root can hand
+	// itself to scenespec.Capture without an adapter.
+	obs.GroupReader
 	obs.EventSource
 }
 
