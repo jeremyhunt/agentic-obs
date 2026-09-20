@@ -22,8 +22,16 @@ const (
 
 // SceneDetails contains detailed information about a scene
 type SceneDetails struct {
-	Name        string                   `json:"name"`
-	IsActive    bool                     `json:"isActive"`
+	Name     string `json:"name"`
+	IsActive bool   `json:"isActive"`
+	// IsPreview reports whether this scene is queued in studio mode -- what goes
+	// live on the next transition. Always false when studio mode is off.
+	//
+	// Without it, a preview change altered nothing a subscriber could read, so
+	// notifying on the event would have been noise by the rule in
+	// ShouldTriggerResourceUpdated. The field is what makes that event
+	// meaningful. (FB-65)
+	IsPreview   bool                     `json:"isPreview"`
 	SceneIndex  int                      `json:"sceneIndex,omitempty"`
 	Sources     []map[string]interface{} `json:"sources,omitempty"`
 	Description string                   `json:"description,omitempty"`
@@ -242,10 +250,19 @@ func (s *Server) handleResourceRead(ctx context.Context, request *mcpsdk.ReadRes
 		currentScene = ""
 	}
 
+	// Get the preview scene too. obs-websocket errors when studio mode is off,
+	// which is the normal case rather than a fault, so an error here just means
+	// nothing is queued.
+	previewScene, err := s.obsClient.GetCurrentPreviewScene()
+	if err != nil {
+		previewScene = ""
+	}
+
 	// Build scene details
 	details := SceneDetails{
 		Name:        scene.Name,
 		IsActive:    sceneName == currentScene,
+		IsPreview:   previewScene != "" && sceneName == previewScene,
 		SceneIndex:  scene.Index,
 		Sources:     convertSourcesToMap(scene.Sources),
 		Description: fmt.Sprintf("Scene with %d sources", len(scene.Sources)),

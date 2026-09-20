@@ -163,3 +163,67 @@ func TestLiveEventsReachTheSink(t *testing.T) {
 		}
 	}
 }
+
+// TestLivePreviewSceneEventReachesTheSink proves the preview path end to end.
+//
+// CurrentPreviewSceneChanged is in obs-websocket's Scenes category rather than
+// Ui, which is easy to get wrong and fails silently if wrong -- the event simply
+// never arrives. Confirming that from the protocol is not the same as seeing one.
+//
+// It skips rather than enabling studio mode, because that changes the operator's
+// OBS layout and is outside what a test should do to someone's live setup.
+func TestLivePreviewSceneEventReachesTheSink(t *testing.T) {
+	client := liveClient(t)
+
+	studio, err := client.GetStudioModeEnabled()
+	if err != nil {
+		t.Fatalf("GetStudioModeEnabled: %v", err)
+	}
+	if !studio {
+		t.Skip("studio mode is off; enabling it would rearrange the operator's OBS window")
+	}
+
+	original, err := client.GetCurrentPreviewScene()
+	if err != nil {
+		t.Fatalf("GetCurrentPreviewScene: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := client.SetCurrentPreviewScene(original); err != nil {
+			t.Logf("warning: could not restore preview scene %q: %v", original, err)
+		}
+	})
+
+	scene := fmt.Sprintf("agentic-obs-preview-%d", time.Now().UnixNano())
+	if err := client.CreateScene(scene); err != nil {
+		t.Fatalf("CreateScene: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := client.RemoveScene(scene); err != nil {
+			t.Logf("warning: could not remove scratch scene %q: %v", scene, err)
+		}
+	})
+
+	sink := recordingSink{events: make(chan obs.Event, 32)}
+	client.SetEventSink(sink)
+
+	if err := client.SetCurrentPreviewScene(scene); err != nil {
+		t.Fatalf("SetCurrentPreviewScene: %v", err)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sink.events:
+			if e.Type != obs.EventTypePreviewSceneChanged {
+				continue
+			}
+			if got := e.Payload["scene_name"]; got != scene {
+				continue
+			}
+			return
+		case <-deadline:
+			t.Fatal("no preview scene event arrived within 5s; CurrentPreviewSceneChanged " +
+				"is in the Scenes subscription category -- check the mask includes it")
+		}
+	}
+}

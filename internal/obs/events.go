@@ -55,6 +55,10 @@ const (
 
 	// Studio mode events
 	EventTypeStudioModeChanged EventType = "studio_mode_changed"
+
+	// Preview scene events. In studio mode the preview scene is what goes live
+	// on the next transition, so which scene is queued is state worth reporting.
+	EventTypePreviewSceneChanged EventType = "preview_scene_changed"
 )
 
 // NewEventHandler creates a new event handler with the specified notification function.
@@ -63,6 +67,20 @@ const (
 func NewEventHandler(notificationFunc NotificationFunc) *EventHandler {
 	return &EventHandler{
 		notificationFunc: notificationFunc,
+	}
+}
+
+// HandleEvent forwards any OBS event to the notification function.
+//
+// This is the whole handler as a sink: one method rather than one per kind, so
+// an event added to the translation table is delivered without touching this
+// file. The On* methods below remain for callers still registering an
+// EventCallback, and are what this replaced. (FB-65)
+func (h *EventHandler) HandleEvent(e Event) {
+	log.Printf("[OBS Event] %s %v", e.Type, e.Payload)
+
+	if h.notificationFunc != nil {
+		h.notificationFunc(e.Type, e.Payload)
 	}
 }
 
@@ -374,7 +392,10 @@ func ShouldTriggerResourceUpdated(eventType EventType) bool {
 		// surely as switching scenes does. Only scene_changed was mapped, which
 		// meant a subscriber watching a scene never heard about the contents of
 		// that scene changing. (FB-57)
-		EventTypeSourceVisibilityChanged:
+		EventTypeSourceVisibilityChanged,
+		// Which scene is queued in studio mode is published as isPreview, so
+		// moving the preview changes the representation of two scenes. (FB-65)
+		EventTypePreviewSceneChanged:
 		return true
 
 		// Filter events are deliberately absent, though the client now

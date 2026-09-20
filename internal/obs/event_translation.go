@@ -136,6 +136,11 @@ func eventFrom(raw any, at time.Time) (Event, bool) {
 		return ev(EventTypeStudioModeChanged, map[string]interface{}{
 			"enabled": e.StudioModeEnabled,
 		})
+
+	case *events.CurrentPreviewSceneChanged:
+		return ev(EventTypePreviewSceneChanged, map[string]interface{}{
+			"scene_name": e.SceneName, "action": "preview_changed",
+		})
 	}
 
 	return none()

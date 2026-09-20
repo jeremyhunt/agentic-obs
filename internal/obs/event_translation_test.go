@@ -130,6 +130,15 @@ func TestEventFromTranslatesEveryHandledEvent(t *testing.T) {
 			want:    EventTypeStudioModeChanged,
 			payload: map[string]interface{}{"enabled": true},
 		},
+		{
+			// In studio mode the preview scene is what goes live on the next
+			// transition, so "which scene is queued" is real state an agent can
+			// act on. Nothing in this repo heard about it changing. (FB-65)
+			name:    "preview scene changed",
+			raw:     &events.CurrentPreviewSceneChanged{SceneName: "Starting Soon"},
+			want:    EventTypePreviewSceneChanged,
+			payload: map[string]interface{}{"scene_name": "Starting Soon", "action": "preview_changed"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -160,7 +169,6 @@ func TestEventFromIgnoresUnhandledEvents(t *testing.T) {
 	for _, raw := range []any{
 		&events.SourceFilterEnableStateChanged{},
 		&events.VendorEvent{},
-		&events.CurrentPreviewSceneChanged{},
 		nil,
 	} {
 		if got, ok := eventFrom(raw, at); ok {
