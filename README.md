@@ -432,7 +432,7 @@ agentic-obs/
 ├── main.go                 # Entry point (MCP server or TUI)
 ├── config/                 # Configuration management
 ├── internal/
-│   ├── mcp/               # MCP server implementation (83 tools)
+│   ├── mcp/               # MCP server implementation (87 tools)
 │   ├── obs/               # OBS WebSocket client
 │   ├── storage/           # SQLite persistence
 │   ├── http/              # HTTP server for screenshots and dashboard

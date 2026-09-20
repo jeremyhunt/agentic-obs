@@ -1906,6 +1906,111 @@ field is the device id to pass to create_audio_input.`,
 **Note**: device_kind selects the capture direction and therefore the OBS input
 kind: 'output' maps to wasapi_output_capture, 'input' to wasapi_input_capture.
 Call list_audio_devices first unless you intend to use 'default'.`,
+	// Advanced Scene Switcher (FB-51). Reached through the obs-websocket vendor
+	// interface, so every one of these requires the ASS plugin to be installed.
+	"ass_run_macro": `# ass_run_macro
+
+**Category**: Advanced Scene Switcher
+
+**Description**: Trigger a named Advanced Scene Switcher macro, optionally setting
+variables first. The variables are applied atomically with the macro run, so the
+macro sees them.
+
+**Input**:
+- name (string, required): Exact macro name, case-sensitive, as defined in the ASS UI
+- variables (array, optional): {name, value} pairs applied before the macro runs.
+  Values may be numbers or booleans; ASS stores variables as strings, so they are
+  coerced.
+
+**Output**:
+- macro: The macro that was run
+- variables_set: How many variables were applied
+- message: Success confirmation
+
+**Example Input**:
+{
+  "name": "PersonaShow_sonic_avatar",
+  "variables": [{"name": "duration_ms", "value": 4000}]
+}
+
+**Note**: Requires the Advanced Scene Switcher plugin. A wrong macro name fails at
+the plugin, not here, so check the spelling against the ASS UI. Use
+ass_set_variables when you want to change state without firing a macro.`,
+
+	"ass_send_message": `# ass_send_message
+
+**Category**: Advanced Scene Switcher
+
+**Description**: Broadcast a websocket message that ASS macros can react to through
+their "Websocket message received" condition. This is the loose-coupling
+alternative to naming a macro directly.
+
+**Input**:
+- message (string, required): The message to broadcast
+
+**Output**:
+- message_sent: The string that was broadcast
+- message: Success confirmation
+
+**Example Input**:
+{
+  "message": "stream_starting"
+}
+
+**Note**: Requires the Advanced Scene Switcher plugin. Nothing happens if no macro
+has a matching condition, and that is not reported as an error -- the broadcast
+succeeded, it simply had no listener.`,
+
+	"ass_set_variables": `# ass_set_variables
+
+**Category**: Advanced Scene Switcher
+
+**Description**: Set several Advanced Scene Switcher variables at once, without
+running a macro.
+
+**Input**:
+- variables (array, required): {name, value} pairs. Names are case-sensitive.
+  Values are coerced to strings, so numbers and booleans may be passed directly.
+
+**Output**:
+- variables_set: How many were applied
+- message: Success confirmation
+
+**Example Input**:
+{
+  "variables": [
+    {"name": "current_game", "value": "Elden Ring"},
+    {"name": "viewer_count", "value": 1200}
+  ]
+}
+
+**Note**: Requires the Advanced Scene Switcher plugin. ASS stores every variable as
+a string; {"value": 42} becomes "42". Use ass_run_macro if the variables should be
+visible to a macro that runs immediately afterwards.`,
+
+	"ass_set_variable": `# ass_set_variable
+
+**Category**: Advanced Scene Switcher
+
+**Description**: Set one Advanced Scene Switcher variable. A shorthand for
+ass_set_variables with a single entry.
+
+**Input**:
+- name (string, required): Variable name, case-sensitive
+- value (any, required): Value, coerced to a string
+
+**Output**:
+- variable: The name that was set
+- value: The coerced string value
+- message: Success confirmation
+
+**Example Input**:
+{
+  "name": "current_game",
+  "value": "Elden Ring"
+}
+
+**Note**: Requires the Advanced Scene Switcher plugin.`,
 }
 
 // GetToolHelpContent returns the help text for a specific tool, or empty if not found.
