@@ -895,6 +895,10 @@ is what you write back with set_source_settings.`,
 **Input**:
 - scene_name (string, required): Name of scene containing source
 - scene_item_id (int, required): Scene item ID of the source
+- source_name (string, optional): Source name, resolved to a scene item ID.
+  Supply this *or* scene_item_id. Refused if the source is placed more than
+  once in the scene, since the name cannot say which placement you mean; the
+  error lists the candidate IDs.
 - x (float, optional): X position in pixels
 - y (float, optional): Y position in pixels
 - scale_x (float, optional): X scale factor (1.0 = 100%)
@@ -929,6 +933,10 @@ is what you write back with set_source_settings.`,
 **Input**:
 - scene_name (string, required): Name of scene containing source
 - scene_item_id (int, required): Scene item ID of the source
+- source_name (string, optional): Source name, resolved to a scene item ID.
+  Supply this *or* scene_item_id. Refused if the source is placed more than
+  once in the scene, since the name cannot say which placement you mean; the
+  error lists the candidate IDs.
 
 **Output**: Transform object with position, scale, rotation, bounds, crop, size
 
@@ -949,6 +957,10 @@ is what you write back with set_source_settings.`,
 **Input**:
 - scene_name (string, required): Name of scene containing source
 - scene_item_id (int, required): Scene item ID of the source
+- source_name (string, optional): Source name, resolved to a scene item ID.
+  Supply this *or* scene_item_id. Refused if the source is placed more than
+  once in the scene, since the name cannot say which placement you mean; the
+  error lists the candidate IDs.
 - crop_top (int, optional): Pixels to crop from top (default: 0)
 - crop_bottom (int, optional): Pixels to crop from bottom (default: 0)
 - crop_left (int, optional): Pixels to crop from left (default: 0)
@@ -977,6 +989,10 @@ is what you write back with set_source_settings.`,
 **Input**:
 - scene_name (string, required): Name of scene containing source
 - scene_item_id (int, required): Scene item ID of the source
+- source_name (string, optional): Source name, resolved to a scene item ID.
+  Supply this *or* scene_item_id. Refused if the source is placed more than
+  once in the scene, since the name cannot say which placement you mean; the
+  error lists the candidate IDs.
 - bounds_type (string, required): Bounds type (see below)
 - bounds_width (float, optional): Bounds width in pixels
 - bounds_height (float, optional): Bounds height in pixels
@@ -1008,6 +1024,10 @@ is what you write back with set_source_settings.`,
 **Input**:
 - scene_name (string, required): Name of scene containing source
 - scene_item_id (int, required): Scene item ID of the source
+- source_name (string, optional): Source name, resolved to a scene item ID.
+  Supply this *or* scene_item_id. Refused if the source is placed more than
+  once in the scene, since the name cannot say which placement you mean; the
+  error lists the candidate IDs.
 - index (int, required): New index position (0 = bottom layer)
 
 **Output**:
@@ -1035,6 +1055,10 @@ is what you write back with set_source_settings.`,
 **Input**:
 - scene_name (string, required): Name of scene containing source
 - scene_item_id (int, required): Scene item ID of the source
+- source_name (string, optional): Source name, resolved to a scene item ID.
+  Supply this *or* scene_item_id. Refused if the source is placed more than
+  once in the scene, since the name cannot say which placement you mean; the
+  error lists the candidate IDs.
 - locked (bool, required): Whether source should be locked
 
 **Output**:
@@ -1061,6 +1085,10 @@ is what you write back with set_source_settings.`,
 **Input**:
 - scene_name (string, required): Name of source scene
 - scene_item_id (int, required): Scene item ID to duplicate
+- source_name (string, optional): Source name, resolved to a scene item ID.
+  Supply this *or* scene_item_id. Refused if the source is placed more than
+  once in the scene, since the name cannot say which placement you mean; the
+  error lists the candidate IDs.
 - dest_scene_name (string, optional): Destination scene (default: same scene)
 
 **Output**:
@@ -1088,6 +1116,10 @@ is what you write back with set_source_settings.`,
 **Input**:
 - scene_name (string, required): Name of scene containing source
 - scene_item_id (int, required): Scene item ID to remove
+- source_name (string, optional): Source name, resolved to a scene item ID.
+  Supply this *or* scene_item_id. Refused if the source is placed more than
+  once in the scene, since the name cannot say which placement you mean; the
+  error lists the candidate IDs.
 
 **Output**:
 - scene_name: Scene name
