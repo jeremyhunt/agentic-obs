@@ -606,3 +606,40 @@ func (f *Fake) GetOBSStatus() (*obs.OBSStatus, error) {
 		Video:            &v,
 	}, nil
 }
+
+// CreateSceneItem places an existing input into a scene.
+//
+// A reference, not a copy: the input map is untouched, so both placements point
+// at one object and a settings write through either is visible from both.
+// (FB-71)
+func (f *Fake) CreateSceneItem(sceneName, sourceName string, enabled bool) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	sc, ok := f.world.scenes[sceneName]
+	if !ok {
+		return 0, fmt.Errorf("scene %q not found", sceneName)
+	}
+	if _, ok := f.world.inputs[sourceName]; !ok {
+		return 0, fmt.Errorf("source %q not found", sourceName)
+	}
+
+	f.world.nextID++
+	it := &sceneItem{id: f.world.nextID, source: sourceName, enabled: enabled}
+	sc.items = append(sc.items, it)
+
+	return it.id, nil
+}
+
+// RemoveScene deletes a scene and its placements. The inputs survive, as they do
+// in OBS while anything else references them.
+func (f *Fake) RemoveScene(name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if _, ok := f.world.scenes[name]; !ok {
+		return fmt.Errorf("scene %q not found", name)
+	}
+	delete(f.world.scenes, name)
+	return nil
+}

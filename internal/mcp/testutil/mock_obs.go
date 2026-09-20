@@ -73,6 +73,7 @@ type MockOBSClient struct {
 	// Error injection for design tools
 	ErrorOnSetInputMute               error
 	ErrorOnGetVideoSettings           error
+	ErrorOnCreateSceneItem            error
 	ErrorOnSetSourceSettings          error
 	ErrorOnGetInputDefaultSettings    error
 	ErrorOnPressInputPropertiesButton error
@@ -1378,11 +1379,25 @@ func (m *MockOBSClient) CreateInput(sceneName, sourceName, inputKind string, set
 	}
 	m.sceneItemLocked[sceneName][newID] = false
 
-	// Store source settings
+	// Store source settings. An empty map rather than the nil that may have been
+	// passed: a created input has settings, even if none were supplied, and a
+	// nil here reads back as a missing source.
 	if m.sourceSettings == nil {
 		m.sourceSettings = make(map[string]map[string]interface{})
 	}
+	if settings == nil {
+		settings = map[string]interface{}{}
+	}
 	m.sourceSettings[sourceName] = settings
+
+	// Register the input itself, so ListSources can see it. Forgetting this is
+	// what let a created input stay invisible to anything asking whether it
+	// already existed -- ensure_input reported "created" on every call. (FB-71)
+	m.sources = append(m.sources, &typedefs.Input{
+		InputName:            sourceName,
+		InputKind:            inputKind,
+		UnversionedInputKind: inputKind,
+	})
 
 	return newID, nil
 }
@@ -2624,4 +2639,59 @@ func (m *MockOBSClient) ASSSetVariables(variables []obs.ASSVariable) error {
 	}
 	s.ASSVariablesSet = append(s.ASSVariablesSet, variables...)
 	return nil
+}
+
+// CreateSceneItem places an existing input into a scene, sharing it rather than
+// copying it. (FB-71)
+func (m *MockOBSClient) CreateSceneItem(sceneName, sourceName string, enabled bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.ErrorOnCreateSceneItem != nil {
+		return 0, m.ErrorOnCreateSceneItem
+	}
+
+	if !m.connected {
+		return 0, fmt.Errorf("not connected to OBS")
+	}
+
+	sceneExists := false
+	for _, s := range m.scenes {
+		if s == sceneName {
+			sceneExists = true
+			break
+		}
+	}
+	if !sceneExists {
+		return 0, fmt.Errorf("scene '%s' not found", sceneName)
+	}
+
+	if _, ok := m.sourceSettings[sourceName]; !ok {
+		return 0, fmt.Errorf("source '%s' not found", sourceName)
+	}
+
+	kind := ""
+	for _, in := range m.sources {
+		if in.InputName == sourceName {
+			kind = in.InputKind
+			break
+		}
+	}
+
+	m.nextSceneItemID++
+	id := m.nextSceneItemID
+
+	m.sceneItems[sceneName] = append(m.sceneItems[sceneName], obs.SceneSource{
+		ID: id, Name: sourceName, Type: kind, Enabled: enabled, Visible: enabled,
+	})
+	if m.sceneItemTransforms[sceneName] == nil {
+		m.sceneItemTransforms[sceneName] = map[int]*obs.SceneItemTransform{}
+	}
+	m.sceneItemTransforms[sceneName][id] = &obs.SceneItemTransform{ScaleX: 1, ScaleY: 1, Alignment: 5}
+	if m.sceneItemLocked[sceneName] == nil {
+		m.sceneItemLocked[sceneName] = map[int]bool{}
+	}
+	m.sceneItemLocked[sceneName][id] = false
+
+	return id, nil
 }

@@ -24,7 +24,14 @@ type SceneItemClient interface {
 // scenes. OBS models an input as a shared object that scenes reference, so the
 // two lifecycles are separate -- which these rows exist to pin down.
 type InputClient interface {
+	// Scene lifecycle, needed by rows that involve a second scene. The fixture
+	// builds one scene; a row about sharing an input across scenes has to make
+	// the other itself.
+	CreateScene(name string) error
+	RemoveScene(name string) error
+
 	CreateInput(sceneName, sourceName, inputKind string, settings map[string]interface{}) (int, error)
+	CreateSceneItem(sceneName, sourceName string, enabled bool) (int, error)
 	DuplicateSceneItem(sceneName string, sceneItemID int, destScene string) (int, error)
 	RemoveSceneItem(sceneName string, sceneItemID int) error
 	GetSceneByName(name string) (*obs.Scene, error)
@@ -325,6 +332,60 @@ func RunContract(t *testing.T, newClient NewClient) {
 		}
 		if !containsInput(inputs, fx.SourceName) {
 			t.Errorf("input %q disappeared while a placement still referenced it", fx.SourceName)
+		}
+	})
+	t.Run("placing an existing input in another scene shares it, not copies it", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// The semantics ensure_input is built on. CreateInput cannot express this
+		// at all -- it always makes a new object -- so showing one overlay in two
+		// scenes used to mean creating it twice under different names, leaving
+		// two things to configure and keep in step.
+		//
+		// Sharing means a settings change is visible from both placements,
+		// because there is one input underneath. That is the property worth
+		// asserting; two scene items with the same name would satisfy a weaker
+		// check. (FB-71)
+		second := fx.SceneName + "-second"
+		if err := client.CreateScene(second); err != nil {
+			t.Fatalf("CreateScene: %v", err)
+		}
+		t.Cleanup(func() { _ = client.RemoveScene(second) })
+
+		itemID, err := client.CreateSceneItem(second, fx.SourceName, true)
+		if err != nil {
+			t.Fatalf("CreateSceneItem: %v", err)
+		}
+		if itemID <= 0 {
+			t.Errorf("CreateSceneItem returned id %d", itemID)
+		}
+
+		// Still one input, despite two placements.
+		inputs, err := client.ListSources()
+		if err != nil {
+			t.Fatalf("ListSources: %v", err)
+		}
+		count := 0
+		for _, in := range inputs {
+			if in != nil && in.InputName == fx.SourceName {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("found %d inputs named %q; placing one in a second scene must not create another",
+				count, fx.SourceName)
+		}
+
+		// And a settings write through the shared object is one write.
+		if err := client.SetSourceSettings(fx.SourceName, map[string]interface{}{"width": 321.0}, true); err != nil {
+			t.Fatalf("SetSourceSettings: %v", err)
+		}
+		got, err := client.GetSourceSettings(fx.SourceName)
+		if err != nil {
+			t.Fatalf("GetSourceSettings: %v", err)
+		}
+		if got["width"] != 321.0 {
+			t.Errorf("width is %#v after writing through the shared input, want 321", got["width"])
 		}
 	})
 	t.Run("creating an input with a name already in use fails", func(t *testing.T) {

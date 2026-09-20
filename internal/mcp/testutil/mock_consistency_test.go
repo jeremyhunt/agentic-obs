@@ -162,3 +162,59 @@ func TestRemovingASceneItemRemovesItEverywhere(t *testing.T) {
 		t.Error("a removed item still has a readable lock state")
 	}
 }
+
+// TestCreatedInputIsListed: an input created through the mock must appear in the
+// input list, as it does in OBS.
+//
+// It did not. CreateInput wrote to sceneItems, sceneItemTransforms,
+// sceneItemLocked and sourceSettings, and never to the slice ListSources
+// returns -- so anything asking "does this input already exist?" was told no,
+// forever. ensure_input asks exactly that, and reported "created" on every call
+// as a result.
+//
+// Same shape as the three disagreements FB-64 fixed: state spread across
+// several fields with nothing keeping them in step. obstest.Fake keeps one
+// world and cannot have this bug, which is the argument for folding this double
+// onto it. (FB-71)
+func TestCreatedInputIsListed(t *testing.T) {
+	m := NewMockOBSClient()
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if _, err := m.CreateInput("Scene 1", "Fresh Source", "color_source_v3", nil); err != nil {
+		t.Fatalf("CreateInput: %v", err)
+	}
+
+	inputs, err := m.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	for _, in := range inputs {
+		if in != nil && in.InputName == "Fresh Source" {
+			if in.InputKind != "color_source_v3" {
+				t.Errorf("listed kind is %q, want color_source_v3", in.InputKind)
+			}
+			return
+		}
+	}
+	t.Error("a created input is absent from ListSources; nothing can discover it exists")
+}
+
+// TestCreatedInputHasReadableSettings: creating with no settings must still
+// leave the input readable, rather than storing a nil map that reads back as a
+// missing source.
+func TestCreatedInputHasReadableSettings(t *testing.T) {
+	m := NewMockOBSClient()
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if _, err := m.CreateInput("Scene 1", "Fresh Source", "color_source_v3", nil); err != nil {
+		t.Fatalf("CreateInput: %v", err)
+	}
+
+	if _, err := m.GetSourceSettings("Fresh Source"); err != nil {
+		t.Errorf("settings for a freshly created input are unreadable: %v", err)
+	}
+}
