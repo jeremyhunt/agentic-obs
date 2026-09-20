@@ -389,9 +389,36 @@ func (m *MockOBSClient) GetSceneByName(name string) (*obs.Scene, error) {
 		return nil, fmt.Errorf("scene '%s' not found", name)
 	}
 
-	sources := m.sceneItems[name]
-	if sources == nil {
-		sources = []obs.SceneSource{}
+	// A scene item's state is spread across three maps here. sceneItems holds a
+	// copy of the geometry and the lock, but the authoritative values live in
+	// sceneItemTransforms and sceneItemLocked -- and the setters write only
+	// there, so the copy goes stale the moment anything is moved or locked.
+	//
+	// Deriving the answer rather than returning the copy is what stops this
+	// double contradicting itself. It matters more than tidiness: a tool that
+	// writes through one accessor and reads back through another would pass its
+	// test here and fail against OBS, which holds one scene item and answers
+	// every question from it. (FB-64)
+	stored := m.sceneItems[name]
+	sources := make([]obs.SceneSource, 0, len(stored))
+
+	for _, item := range stored {
+		src := item
+
+		if tr := m.sceneItemTransforms[name][item.ID]; tr != nil {
+			src.X, src.Y = tr.PositionX, tr.PositionY
+			src.Width, src.Height = tr.Width, tr.Height
+			src.ScaleX, src.ScaleY = tr.ScaleX, tr.ScaleY
+			src.Rotation = tr.Rotation
+		}
+		if locked, ok := m.sceneItemLocked[name][item.ID]; ok {
+			src.Locked = locked
+		}
+		// Visible and Enabled are one fact under two names, as the real client
+		// has reported them since FB-60.
+		src.Visible = src.Enabled
+
+		sources = append(sources, src)
 	}
 
 	return &obs.Scene{
