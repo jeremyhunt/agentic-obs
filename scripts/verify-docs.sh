@@ -13,12 +13,27 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Current expected values - UPDATE THESE AFTER EACH PHASE
-EXPECTED_TOOLS=81
-EXPECTED_RESOURCES=4
-EXPECTED_PROMPTS=14
+# Expected values are read from internal/mcp/help_content.go, which is the single
+# place a human states them. Declaring them again here meant two numbers that had
+# to agree, and this script then "verified" one literal against the other. (FB-52)
+read_go_const() {
+    grep -E "^[[:space:]]*$1[[:space:]]*=" internal/mcp/help_content.go 2>/dev/null \
+        | head -1 | awk -F'=' '{print $2}' | awk '{print $1}'
+}
+
+EXPECTED_TOOLS=$(read_go_const HelpToolCount)
+EXPECTED_RESOURCES=$(read_go_const HelpResourceCount)
+EXPECTED_PROMPTS=$(read_go_const HelpPromptCount)
 EXPECTED_API_ENDPOINTS=8
 CURRENT_PHASE=13
+
+for _name in EXPECTED_TOOLS EXPECTED_RESOURCES EXPECTED_PROMPTS; do
+    eval "_value=\$$_name"
+    if ! [ "$_value" -eq "$_value" ] 2>/dev/null; then
+        echo "Could not read $_name from internal/mcp/help_content.go" >&2
+        exit 1
+    fi
+done
 
 echo "=========================================="
 echo "Documentation Consistency Verification"
@@ -194,42 +209,13 @@ else
     ISSUES_FOUND=1
 fi
 
-# Check help_content.go constants match expected values
+# The constants themselves are no longer checked here: EXPECTED_* is read from
+# them, so any such check would compare a value to itself. Go tests own that
+# relationship instead -- TestHelpToolCountMatchesRegisteredTools compares
+# HelpToolCount to the tools the server actually serves over MCP. What follows
+# checks the documentation against those constants, which is real work. (FB-52)
 echo ""
 echo "--- Help Tool Content Consistency ---"
-
-# Check HelpToolCount constant (use word boundary to avoid matching HelpHelpToolCount)
-echo -n "Checking: HelpToolCount constant ($EXPECTED_TOOLS)... "
-HELP_TOOL_CONST=$(grep -E "^\s*HelpToolCount\s*=" internal/mcp/help_content.go 2>/dev/null | head -1 | awk -F'=' '{print $2}' | awk '{print $1}' || echo "0")
-if [ "$HELP_TOOL_CONST" = "$EXPECTED_TOOLS" ]; then
-    echo -e "${GREEN}OK${NC}"
-else
-    echo -e "${RED}ISSUES FOUND${NC}"
-    echo -e "  ${YELLOW}→${NC} HelpToolCount is $HELP_TOOL_CONST (expected $EXPECTED_TOOLS)"
-    ISSUES_FOUND=1
-fi
-
-# Check HelpPromptCount constant
-echo -n "Checking: HelpPromptCount constant ($EXPECTED_PROMPTS)... "
-HELP_PROMPT_CONST=$(grep -E "^\s*HelpPromptCount\s*=" internal/mcp/help_content.go 2>/dev/null | head -1 | awk -F'=' '{print $2}' | awk '{print $1}' || echo "0")
-if [ "$HELP_PROMPT_CONST" = "$EXPECTED_PROMPTS" ]; then
-    echo -e "${GREEN}OK${NC}"
-else
-    echo -e "${RED}ISSUES FOUND${NC}"
-    echo -e "  ${YELLOW}→${NC} HelpPromptCount is $HELP_PROMPT_CONST (expected $EXPECTED_PROMPTS)"
-    ISSUES_FOUND=1
-fi
-
-# Check HelpResourceCount constant
-echo -n "Checking: HelpResourceCount constant ($EXPECTED_RESOURCES)... "
-HELP_RESOURCE_CONST=$(grep -E "^\s*HelpResourceCount\s*=" internal/mcp/help_content.go 2>/dev/null | head -1 | awk -F'=' '{print $2}' | awk '{print $1}' || echo "0")
-if [ "$HELP_RESOURCE_CONST" = "$EXPECTED_RESOURCES" ]; then
-    echo -e "${GREEN}OK${NC}"
-else
-    echo -e "${RED}ISSUES FOUND${NC}"
-    echo -e "  ${YELLOW}→${NC} HelpResourceCount is $HELP_RESOURCE_CONST (expected $EXPECTED_RESOURCES)"
-    ISSUES_FOUND=1
-fi
 
 # Check tool count in help_content.go text
 echo -n "Checking: help_content.go tool count text ($EXPECTED_TOOLS)... "
