@@ -72,6 +72,7 @@ type MockOBSClient struct {
 
 	// Error injection for design tools
 	ErrorOnSetInputMute               error
+	ErrorOnGetVideoSettings           error
 	ErrorOnSetSourceSettings          error
 	ErrorOnGetInputDefaultSettings    error
 	ErrorOnPressInputPropertiesButton error
@@ -1043,7 +1044,43 @@ func (m *MockOBSClient) GetOBSStatus() (*obs.OBSStatus, error) {
 		FrameTime:        16.67,
 		Frames:           10000,
 		DroppedFrames:    5,
+		Video:            m.videoSettings(),
 	}, nil
+}
+
+// videoSettings is the canvas the mock reports. Caller must hold the lock.
+//
+// Deliberately not 1920x1080, and deliberately downscaled. A fixture that
+// matches the most common assumption lets a test pass on hardcoded numbers
+// instead of the reported ones -- which is exactly what the scene-designer skill
+// did, and why it was wrong on a 2560x1440 canvas. The frame rate is fractional
+// for the same reason: 60000/1001 catches code that reads the numerator alone
+// and calls it 60000. (FB-69)
+func (m *MockOBSClient) videoSettings() *obs.VideoSettings {
+	return &obs.VideoSettings{
+		BaseWidth:      2560,
+		BaseHeight:     1440,
+		OutputWidth:    1920,
+		OutputHeight:   1080,
+		FPSNumerator:   60000,
+		FPSDenominator: 1001,
+	}
+}
+
+// GetVideoSettings returns the mock canvas.
+func (m *MockOBSClient) GetVideoSettings() (*obs.VideoSettings, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.ErrorOnGetVideoSettings != nil {
+		return nil, m.ErrorOnGetVideoSettings
+	}
+
+	if !m.connected {
+		return nil, fmt.Errorf("not connected to OBS")
+	}
+
+	return m.videoSettings(), nil
 }
 
 // Helper methods for test setup

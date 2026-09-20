@@ -31,6 +31,7 @@ type OBSClient interface {
 	obs.HotkeyTrigger
 	obs.Screenshotter
 	obs.StatusReader
+	obs.CanvasReader
 	obs.ScenePresetOperator
 	obs.AdvancedSceneSwitcherController
 	obs.EventSource
