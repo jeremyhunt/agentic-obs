@@ -367,7 +367,18 @@ func ShouldTriggerListChanged(eventType EventType) bool {
 // ShouldTriggerResourceUpdated returns true if the event type should trigger
 // a "resources/updated" notification for a specific resource (scene change).
 func ShouldTriggerResourceUpdated(eventType EventType) bool {
-	return eventType == EventTypeSceneChanged
+	switch eventType {
+	case EventTypeSceneChanged,
+		// A scene's obs://scene/{name} representation includes each item's
+		// visibility, so hiding or showing a source changes the resource just as
+		// surely as switching scenes does. Only scene_changed was mapped, which
+		// meant a subscriber watching a scene never heard about the contents of
+		// that scene changing. (FB-57)
+		EventTypeSourceVisibilityChanged:
+		return true
+	default:
+		return false
+	}
 }
 
 // EventMetrics tracks statistics about OBS events for monitoring and debugging.

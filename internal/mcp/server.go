@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -243,6 +244,13 @@ func NewServer(config ServerConfig) (*Server, error) {
 		},
 		&mcpsdk.ServerOptions{
 			CompletionHandler: s.handleCompletion,
+			// Without these the SDK advertises resources.subscribe=false and
+			// ResourceUpdated has nobody to deliver to: it only notifies sessions
+			// present in the server's subscription set, which stays empty. The
+			// server was logging "Sent resource updated notification" while
+			// sending nothing at all. The SDK panics unless both are set. (FB-57)
+			SubscribeHandler:   s.handleSubscribe,
+			UnsubscribeHandler: s.handleUnsubscribe,
 		},
 	)
 	s.mcpServer = mcpServer
@@ -422,6 +430,28 @@ func (s *Server) recordAction(toolName, action string, input interface{}, output
 	if _, err := s.storage.RecordAction(s.ctx, record); err != nil {
 		log.Printf("Warning: failed to record action history: %v", err)
 	}
+}
+
+// handleSubscribe accepts a client's request to receive notifications for a
+// resource URI. The SDK tracks the subscriber set itself; this hook exists so the
+// capability is advertised and so we can reject URIs we will never notify about,
+// which is friendlier than accepting a subscription that stays silent forever.
+func (s *Server) handleSubscribe(ctx context.Context, req *mcpsdk.SubscribeRequest) error {
+	uri := req.Params.URI
+
+	if !strings.HasPrefix(uri, "obs://") {
+		return fmt.Errorf("cannot subscribe to %q: only obs:// resources emit updates", uri)
+	}
+
+	log.Printf("Client subscribed to resource: %s", uri)
+	return nil
+}
+
+// handleUnsubscribe is the counterpart. The SDK requires both handlers or it
+// panics at construction.
+func (s *Server) handleUnsubscribe(ctx context.Context, req *mcpsdk.UnsubscribeRequest) error {
+	log.Printf("Client unsubscribed from resource: %s", req.Params.URI)
+	return nil
 }
 
 // SendResourceUpdated notifies clients that a specific resource has been updated
