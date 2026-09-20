@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -443,8 +444,8 @@ func TestGetOverviewHelp(t *testing.T) {
 		assert.Contains(t, help, "What is agentic-obs")
 		assert.Contains(t, help, "Quick Start")
 		assert.Contains(t, help, "Key Features")
-		assert.Contains(t, help, "81 Tools")
-		assert.Contains(t, help, "4 Resource Types")
+		assert.Contains(t, help, fmt.Sprintf("%d Tools", HelpToolCount))
+		assert.Contains(t, help, fmt.Sprintf("%d Resource Types", HelpResourceCount))
 	})
 
 	t.Run("verbose overview includes additional sections", func(t *testing.T) {
