@@ -41,6 +41,11 @@ type AutomationEngine struct {
 	// Retention sweep configuration. Guarded by e.mu.
 	executionRetention     time.Duration
 	retentionSweepInterval time.Duration
+
+	// clock supplies the current time for cooldown decisions. Tests replace it
+	// with a fake so they can advance past a deadline instead of sleeping
+	// through it. (FB-56)
+	clock clock
 }
 
 // NewAutomationEngine creates a new automation engine.
@@ -57,6 +62,7 @@ func NewAutomationEngine(db *storage.DB, obsClient OBSClient) *AutomationEngine 
 		eventChan:              make(chan EventPayload, 100),
 		executionRetention:     defaultExecutionRetention,
 		retentionSweepInterval: defaultRetentionSweepInterval,
+		clock:                  realClock{},
 	}
 
 	return engine
@@ -306,7 +312,7 @@ func (e *AutomationEngine) dispatchEvent(payload EventPayload) {
 
 	// Find matching rules, recording cooldown atomically for each match.
 	var matching []*Rule
-	now := time.Now()
+	now := e.clock.Now()
 	for _, rule := range e.rules {
 		if !rule.Enabled {
 			continue
@@ -377,7 +383,7 @@ func (e *AutomationEngine) checkCooldownLocked(rule *Rule) bool {
 	}
 
 	cooldown := time.Duration(rule.CooldownMs) * time.Millisecond
-	return time.Since(lastRun) >= cooldown
+	return e.clock.Since(lastRun) >= cooldown
 }
 
 // executeScheduledRule is called by the scheduler.

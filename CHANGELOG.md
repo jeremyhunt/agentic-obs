@@ -28,6 +28,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`automation-setup` prompt (FB-20 follow-up)** — 14th MCP workflow prompt; guides users through creating, testing, and monitoring automation rules. Accepts optional `rule_type` ('event'|'schedule') and `trigger_event` arguments for targeted guidance.
 
 ### Fixed
+- **Intermittent `TestEngineCooldown` failure (FB-56, closes FB-37)** — the test
+  slept for exactly as long as the cooldown it was waiting out, so it raced the
+  boundary and failed at `-count>=3`. The engine's cooldown decisions now read the
+  time through an injectable `clock`, and the test advances a fake clock past the
+  deadline instead of sleeping through it. Several sleep-then-assert blocks in the
+  same file were converted to wait-for-the-observable, which is what they were
+  approximating. Ten consecutive package runs, previously flaking roughly one in
+  four, now pass.
 - **`set_visibility` automation action toggled instead of setting (FB-55)** — the
   executor delegated to `toggleVisibility` under a comment claiming obs-websocket
   had no setter. It has one, and `internal/obs` was already calling it privately;
