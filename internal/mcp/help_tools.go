@@ -794,6 +794,11 @@ is what you write back with set_source_settings.`,
 - font_name (string, optional): Font face name (default: "Arial")
 - font_size (int, optional): Font size in points (default: 36)
 - color (int, optional): Text color as ABGR integer (default: white)
+- if_exists (string, optional, default "error"): What to do if the source
+  already exists. "error" refuses (the default, and what this tool has always
+  done). "update" applies these settings to the existing source, reporting
+  updated or unchanged. "skip" leaves it alone. Use ensure_input when
+  create-or-update is what you want throughout.
 
 **Output**:
 - scene_name: Scene name
@@ -822,6 +827,11 @@ is what you write back with set_source_settings.`,
 - scene_name (string, required): Name of scene to add source to
 - source_name (string, required): Name for the new image source
 - file_path (string, required): Path to the image file
+- if_exists (string, optional, default "error"): What to do if the source
+  already exists. "error" refuses (the default, and what this tool has always
+  done). "update" applies these settings to the existing source, reporting
+  updated or unchanged. "skip" leaves it alone. Use ensure_input when
+  create-or-update is what you want throughout.
 
 **Output**:
 - scene_name: Scene name
@@ -851,6 +861,11 @@ is what you write back with set_source_settings.`,
 - color (int, required): Color as ABGR integer
 - width (int, optional): Width in pixels (default: 1920)
 - height (int, optional): Height in pixels (default: 1080)
+- if_exists (string, optional, default "error"): What to do if the source
+  already exists. "error" refuses (the default, and what this tool has always
+  done). "update" applies these settings to the existing source, reporting
+  updated or unchanged. "skip" leaves it alone. Use ensure_input when
+  create-or-update is what you want throughout.
 
 **Output**:
 - scene_name: Scene name
@@ -884,6 +899,20 @@ is what you write back with set_source_settings.`,
 - width (int, optional): Browser width in pixels (default: 800)
 - height (int, optional): Browser height in pixels (default: 600)
 - fps (int, optional): Frame rate (default: 30)
+- if_exists (string, optional, default "error"): What to do if the source
+  already exists. "error" refuses (the default, and what this tool has always
+  done). "update" applies these settings to the existing source, reporting
+  updated or unchanged. "skip" leaves it alone. Use ensure_input when
+  create-or-update is what you want throughout.
+- css (string, optional): Custom CSS injected into the page. Omit to keep OBS's
+  default stylesheet, which hides scrollbars and makes the background
+  transparent -- usually what an overlay wants.
+- is_local_file (bool, optional): Treat url as a local file path.
+- shutdown (bool, optional): Free the browser when the source is hidden. Saves
+  memory; loses page state on every hide.
+- restart_when_active (bool, optional): Reload the page each time the source
+  becomes visible. Leave this alone unless you mean it: turning it on breaks any
+  overlay that holds a connection across scene switches.
 
 **Output**:
 - scene_name: Scene name
@@ -915,6 +944,11 @@ is what you write back with set_source_settings.`,
 - source_name (string, required): Name for the new media source
 - file_path (string, required): Path to the media file
 - loop (bool, optional): Whether to loop the media (default: false)
+- if_exists (string, optional, default "error"): What to do if the source
+  already exists. "error" refuses (the default, and what this tool has always
+  done). "update" applies these settings to the existing source, reporting
+  updated or unchanged. "skip" leaves it alone. Use ensure_input when
+  create-or-update is what you want throughout.
 
 **Output**:
 - scene_name: Scene name
