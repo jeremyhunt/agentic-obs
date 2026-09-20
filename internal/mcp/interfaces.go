@@ -39,6 +39,7 @@ type OBSClient interface {
 	ListSources() ([]*typedefs.Input, error)
 	GetSourceSettings(sourceName string) (map[string]interface{}, error)
 	ToggleSourceVisibility(sceneName string, sourceID int) (bool, error)
+	SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error
 
 	// Audio operations
 	GetInputMute(inputName string) (bool, error)

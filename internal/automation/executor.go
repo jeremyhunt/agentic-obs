@@ -31,6 +31,7 @@ type OBSClient interface {
 
 	// Source visibility
 	ToggleSourceVisibility(sceneName string, sourceID int) (bool, error)
+	SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error
 
 	// Virtual camera operations
 	ToggleVirtualCam() (bool, error)
@@ -245,12 +246,30 @@ func (e *Executor) toggleVisibility(params map[string]interface{}) error {
 	return err
 }
 
-// setVisibility sets source visibility to a specific state.
+// setVisibility sets source visibility to an explicit state.
+//
+// This used to call toggleVisibility, under a comment claiming obs-websocket had
+// no setter. It does, and internal/obs used it privately; it simply was not on
+// the client interface. The effect was that a rule asking for visible=true
+// flipped the item instead, so firing the rule twice hid what it was meant to
+// show -- and any invariant built on it would oscillate by construction. (FB-55)
 func (e *Executor) setVisibility(params map[string]interface{}) error {
-	// Note: OBS WebSocket doesn't have a direct "set visibility" - only toggle
-	// For now, this is the same as toggle. A future enhancement could
-	// get current state and only toggle if needed.
-	return e.toggleVisibility(params)
+	sceneName, ok := getStringParam(params, "scene_name")
+	if !ok {
+		return fmt.Errorf("set_visibility requires 'scene_name'")
+	}
+
+	sourceID, ok := getIntParam(params, "source_id")
+	if !ok {
+		return fmt.Errorf("set_visibility requires 'source_id'")
+	}
+
+	visible, ok := getBoolParam(params, "visible")
+	if !ok {
+		return fmt.Errorf("set_visibility requires 'visible'")
+	}
+
+	return e.obsClient.SetSceneItemEnabled(sceneName, sourceID, visible)
 }
 
 // triggerHotkey triggers a hotkey by name.

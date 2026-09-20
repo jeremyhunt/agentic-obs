@@ -30,8 +30,12 @@ type SourceNameInput struct {
 
 // SourceVisibilityInput is the input for toggling source visibility
 type SourceVisibilityInput struct {
-	SceneName string `json:"scene_name"`
-	SourceID  int64  `json:"source_id"`
+	SceneName string `json:"scene_name" jsonschema:"Name of the scene containing the source"`
+	SourceID  int64  `json:"source_id" jsonschema:"Scene item ID of the source"`
+	// Visible follows the toggle_source_filter pattern: supply it to set an
+	// explicit state, omit it to flip whatever the current state is. Prefer
+	// supplying it -- a bare toggle is not safe to retry. (FB-55)
+	Visible *bool `json:"visible,omitempty" jsonschema:"Set true/false for an explicit state; omit to toggle the current one"`
 }
 
 // InputNameInput is the input for audio input operations
@@ -1313,12 +1317,25 @@ func (s *Server) handleListSources(ctx context.Context, request *mcpsdk.CallTool
 
 func (s *Server) handleToggleSourceVisibility(ctx context.Context, request *mcpsdk.CallToolRequest, input SourceVisibilityInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Toggling visibility for source %d in scene: %s", input.SourceID, input.SceneName)
 
-	newState, err := s.obsClient.ToggleSourceVisibility(input.SceneName, int(input.SourceID))
-	if err != nil {
-		s.recordAction("toggle_source_visibility", "Toggle source visibility", input, nil, false, time.Since(start))
-		return nil, nil, fmt.Errorf("failed to toggle source visibility: %w", err)
+	var newState bool
+	if input.Visible != nil {
+		// Explicit state. Idempotent, so safe to retry and safe for two callers
+		// to request the same thing.
+		newState = *input.Visible
+		log.Printf("Setting visibility of source %d in scene '%s' to %t", input.SourceID, input.SceneName, newState)
+		if err := s.obsClient.SetSceneItemEnabled(input.SceneName, int(input.SourceID), newState); err != nil {
+			s.recordAction("toggle_source_visibility", "Set source visibility", input, nil, false, time.Since(start))
+			return nil, nil, fmt.Errorf("failed to set source visibility: %w", err)
+		}
+	} else {
+		log.Printf("Toggling visibility for source %d in scene: %s", input.SourceID, input.SceneName)
+		var err error
+		newState, err = s.obsClient.ToggleSourceVisibility(input.SceneName, int(input.SourceID))
+		if err != nil {
+			s.recordAction("toggle_source_visibility", "Toggle source visibility", input, nil, false, time.Since(start))
+			return nil, nil, fmt.Errorf("failed to toggle source visibility: %w", err)
+		}
 	}
 
 	result := map[string]interface{}{
@@ -1326,7 +1343,7 @@ func (s *Server) handleToggleSourceVisibility(ctx context.Context, request *mcps
 		"source_id":  input.SourceID,
 		"visible":    newState,
 	}
-	s.recordAction("toggle_source_visibility", "Toggle source visibility", input, result, true, time.Since(start))
+	s.recordAction("toggle_source_visibility", "Set source visibility", input, result, true, time.Since(start))
 	return nil, result, nil
 }
 

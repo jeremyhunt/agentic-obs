@@ -251,24 +251,29 @@ var toolHelpContent = map[string]string{
 
 **Category**: Sources
 
-**Description**: Toggle the visibility of a source in a specific scene (show/hide).
+**Description**: Show or hide a source in a scene. Supply 'visible' to set an
+explicit state, or omit it to flip whatever the current state is.
 
 **Input**:
-- scene_name (string, required): Name of scene containing source
+- scene_name (string, required): Name of the scene containing the source
 - source_id (int, required): Scene item ID of the source
+- visible (bool, optional): Explicit state. Omit to toggle.
 
 **Output**:
 - scene_name: Scene name
-- source_id: Source ID
-- visible: New visibility state (bool)
+- source_id: Scene item ID
+- visible: The resulting visibility state
 
 **Example Input**:
 {
-  "scene_name": "Gaming",
-  "source_id": 1
+  "scene_name": "Main",
+  "source_id": 3,
+  "visible": true
 }
 
-**Note**: Use list_sources or read obs://scene/{name} resource to get source IDs.`,
+**Note**: Prefer passing visible. A bare toggle is not safe to retry -- if a call
+times out and you repeat it, the source ends up back where it started. With an
+explicit state the call is idempotent.`,
 
 	"get_source_settings": `# get_source_settings
 
