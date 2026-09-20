@@ -92,7 +92,7 @@ Claude should recognize and describe the agentic-obs skills.
 - Crop and visibility control
 - Source filters: chroma key, color correction, sharpen, noise suppression
 
-**Tools used**: All 14 Design tools plus the 7 Filters tools — `create_text_source`, `create_image_source`, `create_color_source`, `create_browser_source`, `set_source_transform`, `get_source_transform`, `set_source_crop`, `remove_source_from_scene`, `duplicate_source`, `set_source_index`, `set_source_blend_mode`, `set_source_locked`, `set_source_visible`, `get_scene_item_id`, `list_source_filters`, `get_source_filter`, `create_source_filter`, `remove_source_filter`, `toggle_source_filter`, `set_source_filter_settings`, `list_filter_kinds`
+**Tools used**: the Design and Filters tools — `ensure_input`, `create_text_source`, `create_image_source`, `create_color_source`, `create_browser_source`, `create_media_source`, `set_source_settings`, `get_source_settings`, `get_input_default_settings`, `set_source_transform`, `get_source_transform`, `set_source_crop`, `set_source_bounds`, `set_source_order`, `set_source_locked`, `toggle_source_visibility`, `duplicate_source`, `remove_source`, `take_screenshot`, `list_source_filters`, `get_source_filter`, `create_source_filter`, `remove_source_filter`, `toggle_source_filter`, `set_source_filter_settings`, `list_filter_kinds`
 
 **Best for**: Users designing stream layouts, creating overlays, positioning sources, or building complex visual compositions.
 
@@ -149,7 +149,7 @@ on air.
 - Emergency direct-cut guidance (when to bypass preview)
 - Reconnect-safe state inspection
 
-**Tools used**: `get_studio_mode_enabled`, `toggle_studio_mode`, `get_preview_scene`, `set_preview_scene`, `list_scenes`, `get_current_scene`, `set_current_scene`, `list_transitions`, `get_current_transition`, `set_current_transition`, `trigger_transition`
+**Tools used**: `get_studio_mode_enabled`, `toggle_studio_mode`, `get_preview_scene`, `set_preview_scene`, `list_scenes`, `set_current_scene`, `list_transitions`, `get_current_transition`, `set_current_transition`, `trigger_transition`
 
 **Best for**: Broadcast operators, multi-segment shows, and anyone who
 needs to stage scene changes privately before committing them to the
