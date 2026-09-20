@@ -68,7 +68,7 @@ func RunContract(t *testing.T, newClient NewClient) {
 		// stores whatever it was handed would be more agreeable than OBS, and any
 		// test written against it would pass while the real thing behaved
 		// differently.
-		base := &obs.SceneItemTransform{ScaleX: 1, ScaleY: 1, Width: 999, Height: 999, SourceWidth: 999, SourceHeight: 999}
+		base := &obs.SceneItemTransform{ScaleX: 1, ScaleY: 1, BoundsType: "OBS_BOUNDS_NONE", BoundsWidth: 1, BoundsHeight: 1, Width: 999, Height: 999, SourceWidth: 999, SourceHeight: 999}
 		if err := client.SetSceneItemTransform(fx.SceneName, fx.SceneItemID, base); err != nil {
 			t.Fatalf("SetSceneItemTransform: %v", err)
 		}
@@ -77,7 +77,7 @@ func RunContract(t *testing.T, newClient NewClient) {
 			t.Fatalf("GetSceneItemTransform: %v", err)
 		}
 
-		other := &obs.SceneItemTransform{ScaleX: 1, ScaleY: 1, Width: 111, Height: 111, SourceWidth: 111, SourceHeight: 111}
+		other := &obs.SceneItemTransform{ScaleX: 1, ScaleY: 1, BoundsType: "OBS_BOUNDS_NONE", BoundsWidth: 1, BoundsHeight: 1, Width: 111, Height: 111, SourceWidth: 111, SourceHeight: 111}
 		if err := client.SetSceneItemTransform(fx.SceneName, fx.SceneItemID, other); err != nil {
 			t.Fatalf("SetSceneItemTransform: %v", err)
 		}
@@ -94,6 +94,45 @@ func RunContract(t *testing.T, newClient NewClient) {
 				"first {W:%v H:%v SW:%v SH:%v} second {W:%v H:%v SW:%v SH:%v}",
 				first.Width, first.Height, first.SourceWidth, first.SourceHeight,
 				second.Width, second.Height, second.SourceWidth, second.SourceHeight)
+		}
+	})
+	t.Run("rejects an empty bounds type", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// Found by running this contract against a real OBS: obs-websocket
+		// answers RequestFieldEmpty (403) "The field value of `boundsType` must
+		// not be empty", while the fake accepted it silently. goobs marshals the
+		// transform with no omitempty, so an unset BoundsType goes on the wire as
+		// "" rather than being omitted.
+		//
+		// Production paths read-modify-write and so always carry a real bounds
+		// type, but anything constructing a transform from scratch -- applying a
+		// stored scene spec, for one -- will hit this. (FB-58)
+		err := client.SetSceneItemTransform(fx.SceneName, fx.SceneItemID, &obs.SceneItemTransform{
+			ScaleX: 1, ScaleY: 1, BoundsWidth: 1, BoundsHeight: 1,
+		})
+		if err == nil {
+			t.Error("expected an error for an empty bounds type; OBS rejects it, so the fake must too")
+		}
+	})
+	t.Run("rejects bounds dimensions below one", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// The second divergence this contract found against a real OBS:
+		// RequestFieldOutOfRange (402) "The field value of `boundsWidth` is below
+		// the minimum of `1.000000`". It applies even with OBS_BOUNDS_NONE, where
+		// the dimensions are not used for anything -- because goobs sends every
+		// field, so zero is transmitted rather than omitted.
+		//
+		// Together with the empty-boundsType rule this means a transform built
+		// from scratch needs a bounds type and non-zero bounds dimensions, or the
+		// write fails with a message that names a field the caller never set.
+		// apply_scene_spec will construct transforms from scratch. (FB-58)
+		err := client.SetSceneItemTransform(fx.SceneName, fx.SceneItemID, &obs.SceneItemTransform{
+			ScaleX: 1, ScaleY: 1, BoundsType: "OBS_BOUNDS_NONE",
+		})
+		if err == nil {
+			t.Error("expected an error for zero bounds dimensions; OBS requires at least 1")
 		}
 	})
 }
