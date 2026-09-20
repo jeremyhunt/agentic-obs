@@ -1852,6 +1852,60 @@ workflows. Always available; cannot be disabled.
 }
 
 **Note**: help with topic='tools' lists every tool by category.`,
+
+	// Audio - WASAPI device capture
+	"list_audio_devices": `# list_audio_devices
+
+**Category**: Audio
+
+**Description**: List the Windows audio devices (WASAPI) available for capture,
+separated into playback and recording devices. Use the returned device ids with
+create_audio_input.
+
+**Input**: none
+
+**Output**:
+- output_devices: Playback devices, each {name, value}. Includes virtual outputs
+  such as Voicemeeter, which is how TTS audio is commonly routed into OBS.
+- input_devices: Recording devices (microphones), each {name, value}
+- message: Summary of how many of each were found
+
+**Example Input**:
+{}
+
+**Note**: Windows only; WASAPI is not available on macOS or Linux. The 'value'
+field is the device id to pass to create_audio_input.`,
+
+	"create_audio_input": `# create_audio_input
+
+**Category**: Audio
+
+**Description**: Add a WASAPI audio capture source to a scene.
+
+**Input**:
+- scene_name (string, required): Scene to add the source to
+- source_name (string, required): Name for the new audio source
+- device_kind (string, required): 'output' for playback devices (e.g. a Voicemeeter
+  virtual output carrying TTS), 'input' for microphones
+- device_id (string, required): Device id from list_audio_devices, or 'default'
+  for the system default
+
+**Output**:
+- scene_name, source_name, scene_item_id: The created scene item
+- device_kind, input_kind, device_id: What was captured and how
+- message: Success confirmation
+
+**Example Input**:
+{
+  "scene_name": "Main",
+  "source_name": "TTS Output",
+  "device_kind": "output",
+  "device_id": "default"
+}
+
+**Note**: device_kind selects the capture direction and therefore the OBS input
+kind: 'output' maps to wasapi_output_capture, 'input' to wasapi_input_capture.
+Call list_audio_devices first unless you intend to use 'default'.`,
 }
 
 // GetToolHelpContent returns the help text for a specific tool, or empty if not found.
