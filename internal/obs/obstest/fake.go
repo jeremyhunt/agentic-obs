@@ -27,6 +27,7 @@ type Fake struct {
 type world struct {
 	scenes map[string]*scene
 	inputs map[string]*input
+	uuids  map[string]string // overridden source identities; see uuidOf
 	nextID int
 }
 
@@ -53,6 +54,7 @@ type sceneItem struct {
 	transform obs.SceneItemTransform
 	enabled   bool
 	locked    bool
+	blendMode string
 }
 
 // input is a source object. Filters hang off the input rather than off a
@@ -367,24 +369,85 @@ func (f *Fake) renderItems(sc *scene) []obs.SceneSource {
 	out := make([]obs.SceneSource, 0, len(sc.items))
 	for _, it := range sc.items {
 		sourceType, isGroup := f.sourceTypeOf(it.source)
+		blend := it.blendMode
+		if blend == "" {
+			blend = "OBS_BLEND_NORMAL" // what OBS reports for an untouched item
+		}
 		out = append(out, obs.SceneSource{
-			ID:       it.id,
-			Name:     it.source,
-			Type:     sourceType,
-			IsGroup:  isGroup,
-			Enabled:  it.enabled,
-			Visible:  it.enabled,
-			Locked:   it.locked,
-			X:        it.transform.PositionX,
-			Y:        it.transform.PositionY,
-			Width:    it.transform.Width,
-			Height:   it.transform.Height,
-			ScaleX:   it.transform.ScaleX,
-			ScaleY:   it.transform.ScaleY,
-			Rotation: it.transform.Rotation,
+			ID:        it.id,
+			Name:      it.source,
+			Type:      sourceType,
+			IsGroup:   isGroup,
+			UUID:      f.uuidOf(it.source),
+			Kind:      f.kindOf(it.source),
+			BlendMode: blend,
+			Enabled:   it.enabled,
+			Visible:   it.enabled,
+			Locked:    it.locked,
+			X:         it.transform.PositionX,
+			Y:         it.transform.PositionY,
+			Width:     it.transform.Width,
+			Height:    it.transform.Height,
+			ScaleX:    it.transform.ScaleX,
+			ScaleY:    it.transform.ScaleY,
+			Rotation:  it.transform.Rotation,
 		})
 	}
 	return out
+}
+
+// kindOf reports an input's kind. Scenes and groups have none, which is the
+// distinction the capture branches on.
+func (f *Fake) kindOf(name string) string {
+	if in, ok := f.world.inputs[name]; ok {
+		return in.kind
+	}
+	return ""
+}
+
+// uuidOf hands out a stable identity per source.
+//
+// OBS assigns a real uuid; the fake derives one from the name, which is enough
+// for the thing uuids are for here -- telling a rename from a delete-and-create
+// -- as long as it survives a rename. SetSourceUUID is how a test simulates one.
+func (f *Fake) uuidOf(name string) string {
+	if id, ok := f.world.uuids[name]; ok {
+		return id
+	}
+	return "fake-uuid-" + name
+}
+
+// SourceUUID reports a source's identity, so a test can rename it and keep it.
+func (f *Fake) SourceUUID(sourceName string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.uuidOf(sourceName)
+}
+
+// SetSourceUUID pins a source's identity, so a test can rename a source and
+// keep its uuid -- which is what a real rename does.
+func (f *Fake) SetSourceUUID(sourceName, uuid string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.world.uuids == nil {
+		f.world.uuids = map[string]string{}
+	}
+	f.world.uuids[sourceName] = uuid
+}
+
+// SetSceneItemBlendMode sets how a placement composites.
+func (f *Fake) SetSceneItemBlendMode(sceneName string, sceneItemID int, blendMode string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	it, err := f.findItem(sceneName, sceneItemID)
+	if err != nil {
+		return err
+	}
+	it.blendMode = blendMode
+	return nil
 }
 
 // sourceTypeOf reports how OBS types a placed source. A group and a nested
@@ -748,6 +811,42 @@ func (f *Fake) CreateSceneItem(sceneName, sourceName string, enabled bool) (int,
 	sc.items = append(sc.items, it)
 
 	return it.id, nil
+}
+
+// SetSceneItemIndex moves a placement to a position in its container.
+//
+// Position here means the index in the list GetSceneByName returns, which is
+// what the capture records as Order -- stated that way rather than in terms of
+// which end OBS calls the top, because the fake only has to be self-consistent
+// with its own listing.
+func (f *Fake) SetSceneItemIndex(sceneName string, sceneItemID int, index int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	sc, ok := f.world.scenes[sceneName]
+	if !ok {
+		return fmt.Errorf("scene %q not found", sceneName)
+	}
+	if index < 0 || index >= len(sc.items) {
+		return fmt.Errorf("the field value of `sceneItemIndex` is out of range: %d", index)
+	}
+
+	at := -1
+	for i, it := range sc.items {
+		if it.id == sceneItemID {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return fmt.Errorf("scene item %d not found in scene %q", sceneItemID, sceneName)
+	}
+
+	moved := sc.items[at]
+	sc.items = append(sc.items[:at], sc.items[at+1:]...)
+	rest := append([]*sceneItem(nil), sc.items[index:]...)
+	sc.items = append(append(sc.items[:index], moved), rest...)
+	return nil
 }
 
 // RemoveScene deletes a scene and its placements. The inputs survive, as they do

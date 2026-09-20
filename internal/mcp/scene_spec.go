@@ -80,3 +80,72 @@ func (s *Server) handleCaptureSceneSpec(ctx context.Context, request *mcpsdk.Cal
 	s.recordAction("capture_scene_spec", "Capture scene spec", input, result, true, time.Since(start))
 	return nil, result, nil
 }
+
+// DiffSceneSpecInput is the input for comparing a spec against a live scene.
+type DiffSceneSpecInput struct {
+	Spec      *scenespec.Spec `json:"spec" jsonschema:"A spec document, as returned by capture_scene_spec"`
+	SceneName string          `json:"scene_name,omitempty" jsonschema:"Scene to compare against. Defaults to the scene the spec was captured from"`
+}
+
+// handleDiffSceneSpec reports what differs between a spec and a scene.
+//
+// It is a read: nothing here changes OBS. The findings are exactly what an
+// apply would act on, so a diff is also the dry run.
+//
+// Most of the work is in *not* reporting things. A settings value equal to its
+// kind's default is absent from GetInputSettings, a transform that went out as
+// float64 comes back rounded to float32, and anything the spec does not manage
+// shifts every index below it. Each of those reads as drift to a naive
+// comparison, and a diff that cries wolf is ignored exactly when it matters.
+// (FB-83)
+func (s *Server) handleDiffSceneSpec(ctx context.Context, request *mcpsdk.CallToolRequest, input DiffSceneSpecInput) (*mcpsdk.CallToolResult, any, error) {
+	start := time.Now()
+
+	fail := func(err error) (*mcpsdk.CallToolResult, any, error) {
+		s.recordAction("diff_scene_spec", "Diff scene spec", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+
+	if input.Spec == nil {
+		return fail(fmt.Errorf("spec is required; capture one with capture_scene_spec"))
+	}
+
+	scene := strings.TrimSpace(input.SceneName)
+	if scene == "" {
+		scene = input.Spec.Scene
+	}
+	if scene == "" {
+		return fail(fmt.Errorf("scene_name is required: this spec does not name the scene it came from"))
+	}
+
+	log.Printf("Diffing scene spec against %s", scene)
+
+	findings, err := scenespec.Diff(s.obsClient, input.Spec, scene)
+	if err != nil {
+		return fail(fmt.Errorf("diffing scene %q: %w", scene, err))
+	}
+
+	counts := map[string]int{}
+	for _, f := range findings {
+		counts[f.Kind]++
+	}
+
+	result := map[string]interface{}{
+		"scene":    scene,
+		"findings": findings,
+		"count":    len(findings),
+		"by_kind":  counts,
+		"matches":  len(findings) == 0,
+	}
+	if len(findings) == 0 {
+		result["note"] = "The scene matches the spec."
+	} else {
+		result["note"] = "drift is a managed value that moved; missing is in the spec " +
+			"and not the scene; unmanaged is in the scene and not the spec, and an " +
+			"apply leaves it alone; kind_mismatch needs the source recreated, which " +
+			"destroys its placements; renamed is the same source under a new name."
+	}
+
+	s.recordAction("diff_scene_spec", "Diff scene spec", input, result, true, time.Since(start))
+	return nil, result, nil
+}

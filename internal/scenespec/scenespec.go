@@ -87,6 +87,11 @@ func FullCapture() Options {
 type SourceSpec struct {
 	Name string `json:"name"`
 
+	// UUID is the source's stable identity, captured so a diff can tell a
+	// rename from a delete-and-create. It is never used to *find* a source when
+	// applying -- a spec applied to a different machine will match on name.
+	UUID string `json:"uuid,omitempty"`
+
 	// Type is SourceInput, SourceScene or SourceGroup.
 	Type string `json:"type"`
 
@@ -141,6 +146,9 @@ type ItemSpec struct {
 
 	Enabled bool `json:"enabled"`
 	Locked  bool `json:"locked"`
+
+	// BlendMode is how the placement composites, e.g. OBS_BLEND_NORMAL.
+	BlendMode string `json:"blend_mode,omitempty"`
 
 	// Transform is the full placement geometry, including the bounds fields
 	// that OBS reports as zero and then refuses on write. obs.NormaliseBounds

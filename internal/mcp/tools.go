@@ -491,6 +491,14 @@ func (s *Server) registerToolHandlers() {
 
 		mcpsdk.AddTool(s.mcpServer,
 			&mcpsdk.Tool{
+				Name:        "diff_scene_spec",
+				Description: "Compare a captured scene spec against the live scene and report what differs, classified as drift, missing, unmanaged, kind_mismatch or renamed. A read-only dry run of what an apply would do",
+			},
+			s.handleDiffSceneSpec,
+		)
+
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
 				Name:        "call_obs_request",
 				Description: "Issue any obs-websocket request by name. The completeness escape hatch: the typed tools cover about 65 of the protocol's 151 requests, and this reaches the rest, including media playback, profiles, scene collections, projectors, stats and generic outputs",
 			},

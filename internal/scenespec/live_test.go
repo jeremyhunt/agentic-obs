@@ -233,3 +233,84 @@ func (c *countingReader) GetSourceSettings(name string) (map[string]interface{},
 	c.settings++
 	return c.Reader.GetSourceSettings(name)
 }
+
+// TestLiveDiffOfEveryUnchangedSceneIsQuiet is the test the tolerance and
+// defaults handling exist for.
+//
+// Capturing a scene and immediately diffing it must report nothing. Against the
+// fake that is nearly free; against a real OBS it is the whole problem, because
+// this is where float32 rounding, defaults absent from GetInputSettings, and
+// JSON number types all actually happen. A single spurious finding here would
+// appear on every scene an operator ever captured.
+func TestLiveDiffOfEveryUnchangedSceneIsQuiet(t *testing.T) {
+	client := liveClient(t)
+
+	scenes, _, err := client.GetSceneList()
+	if err != nil {
+		t.Fatalf("GetSceneList: %v", err)
+	}
+
+	noisy := 0
+	for _, name := range scenes {
+		spec, err := scenespec.Capture(client, name)
+		if err != nil {
+			t.Errorf("capturing %q: %v", name, err)
+			continue
+		}
+
+		findings, err := scenespec.Diff(client, spec, name)
+		if err != nil {
+			t.Errorf("diffing %q: %v", name, err)
+			continue
+		}
+		if len(findings) == 0 {
+			continue
+		}
+
+		noisy++
+		t.Errorf("%s: capture then diff reports %d findings against an unchanged scene",
+			name, len(findings))
+		for i, f := range findings {
+			if i == 5 {
+				t.Logf("    ... and %d more", len(findings)-5)
+				break
+			}
+			t.Logf("    %s %s .%s: %s", f.Kind, f.Subject, f.Field, f.Detail)
+		}
+	}
+
+	t.Logf("%d scenes diffed, %d reported spurious findings", len(scenes), noisy)
+}
+
+// TestLiveDiffSeesARealChange is the other half: quiet is only a virtue if the
+// diff still speaks up. Read-only -- it edits the spec, never the scene.
+func TestLiveDiffSeesARealChange(t *testing.T) {
+	client := liveClient(t)
+
+	scenes, _, err := client.GetSceneList()
+	if err != nil || len(scenes) == 0 {
+		t.Fatalf("GetSceneList: %v", err)
+	}
+
+	for _, name := range scenes {
+		spec, err := scenespec.Capture(client, name)
+		if err != nil || len(spec.Items) == 0 || spec.Items[0].Transform == nil {
+			continue
+		}
+
+		// Move a placement in the document, not in OBS.
+		spec.Items[0].Transform.PositionX += 37
+		findings, err := scenespec.Diff(client, spec, name)
+		if err != nil {
+			t.Fatalf("Diff: %v", err)
+		}
+		for _, f := range findings {
+			if f.Kind == scenespec.FindingDrift && f.Field == "transform.position_x" {
+				t.Logf("%s: a 37px difference was reported as %s", name, f.Detail)
+				return
+			}
+		}
+		t.Fatalf("%s: a 37px difference was not reported; findings: %d", name, len(findings))
+	}
+	t.Skip("no scene with a placement carrying a transform")
+}
