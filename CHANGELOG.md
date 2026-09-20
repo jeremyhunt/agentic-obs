@@ -48,6 +48,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`automation-setup` prompt (FB-20 follow-up)** — 14th MCP workflow prompt; guides users through creating, testing, and monitoring automation rules. Accepts optional `rule_type` ('event'|'schedule') and `trigger_event` arguments for targeted guidance.
 
 ### Fixed
+- **Subscriptions were accepted for resources that never emit (FB-59)** — the
+  FB-57 guard's comment said it rejected "URIs we will never notify about", but it
+  only checked the `obs://` prefix, so `obs://screenshot/...` and
+  `obs://preset/...` were accepted and the client waited forever. Only
+  `obs://scene/{name}` emits. Found by writing the guard's first test.
 - **Resource update notifications reached no client (FB-57)** — no
   `SubscribeHandler` was set, so the SDK advertised `resources.subscribe=false`
   and `ResourceUpdated`, which delivers only to sessions in the server's

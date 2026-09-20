@@ -799,28 +799,7 @@ func (c *Client) GetSceneItemTransform(sceneName string, sceneItemID int) (*Scen
 		return nil, fmt.Errorf("failed to get transform for item %d in scene '%s': %w", sceneItemID, sceneName, err)
 	}
 
-	t := resp.SceneItemTransform
-	return &SceneItemTransform{
-		PositionX:       t.PositionX,
-		PositionY:       t.PositionY,
-		ScaleX:          t.ScaleX,
-		ScaleY:          t.ScaleY,
-		Rotation:        t.Rotation,
-		Width:           t.Width,
-		Height:          t.Height,
-		SourceWidth:     t.SourceWidth,
-		SourceHeight:    t.SourceHeight,
-		Alignment:       int(t.Alignment),
-		BoundsType:      t.BoundsType,
-		BoundsAlignment: int(t.BoundsAlignment),
-		BoundsWidth:     t.BoundsWidth,
-		BoundsHeight:    t.BoundsHeight,
-		CropToBounds:    t.CropToBounds,
-		CropTop:         int(t.CropTop),
-		CropBottom:      int(t.CropBottom),
-		CropLeft:        int(t.CropLeft),
-		CropRight:       int(t.CropRight),
-	}, nil
+	return fromGoobsTransform(resp.SceneItemTransform), nil
 }
 
 // SetSceneItemTransform sets the transform properties of a scene item.
@@ -1639,4 +1618,34 @@ func (c *Client) StopReplayBuffer() error {
 	}
 
 	return nil
+}
+
+// fromGoobsTransform converts the wire type into ours.
+//
+// Extracted so the read path can be tested without a live OBS, the same way
+// toGoobsTransform is. Every transform tool is read-modify-write, so a field
+// dropped here is written back as zero on the next set -- the same corruption
+// FB-54 caused on the write side, arriving by the other door. (FB-59)
+func fromGoobsTransform(t *typedefs.SceneItemTransform) *SceneItemTransform {
+	return &SceneItemTransform{
+		PositionX:       t.PositionX,
+		PositionY:       t.PositionY,
+		ScaleX:          t.ScaleX,
+		ScaleY:          t.ScaleY,
+		Rotation:        t.Rotation,
+		Alignment:       int(t.Alignment),
+		BoundsType:      t.BoundsType,
+		BoundsAlignment: int(t.BoundsAlignment),
+		BoundsWidth:     t.BoundsWidth,
+		BoundsHeight:    t.BoundsHeight,
+		CropToBounds:    t.CropToBounds,
+		CropTop:         int(t.CropTop),
+		CropBottom:      int(t.CropBottom),
+		CropLeft:        int(t.CropLeft),
+		CropRight:       int(t.CropRight),
+		Width:           t.Width,
+		Height:          t.Height,
+		SourceWidth:     t.SourceWidth,
+		SourceHeight:    t.SourceHeight,
+	}
 }
