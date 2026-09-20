@@ -196,7 +196,7 @@ names the canonical variable to prefer.
 | `toggle_source_visibility` | Show/hide a source in a scene |
 | `get_source_settings` | Get source configuration |
 
-### Audio Control (4 tools)
+### Audio Control (6 tools)
 
 | Tool | Description |
 |------|-------------|
@@ -204,6 +204,8 @@ names the canonical variable to prefer.
 | `toggle_input_mute` | Toggle audio input mute state |
 | `set_input_volume` | Set audio input volume (dB or multiplier) |
 | `get_input_volume` | Get current volume level (dB and multiplier) |
+| `list_audio_devices` | List Windows WASAPI playback and recording devices |
+| `create_audio_input` | Add a WASAPI capture source to a scene |
 
 ### Scene Presets (6 tools)
 
@@ -335,7 +337,7 @@ Enable AI to create and manipulate OBS sources programmatically.
 }
 ```
 
-**Total: 81 tools in 9 groups** (Core, Sources, Audio, Layout, Visual, Design, Filters, Transitions, Automation) + Meta (4 always-enabled tools)
+**Total: 83 tools in 9 groups** (Core, Sources, Audio, Layout, Visual, Design, Filters, Transitions, Automation) + Meta (4 always-enabled tools)
 
 ## MCP Resources
 
@@ -387,7 +389,7 @@ agentic-obs/
 ├── main.go                 # Entry point (MCP server or TUI)
 ├── config/                 # Configuration management
 ├── internal/
-│   ├── mcp/               # MCP server implementation (81 tools)
+│   ├── mcp/               # MCP server implementation (83 tools)
 │   ├── obs/               # OBS WebSocket client
 │   ├── storage/           # SQLite persistence
 │   ├── http/              # HTTP server for screenshots and dashboard
