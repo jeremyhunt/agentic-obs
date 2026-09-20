@@ -67,7 +67,7 @@ Comprehensive documentation for all 81 Model Context Protocol (MCP) tools provid
 
 ## Overview
 
-The agentic-obs MCP server provides 93 tools organized into 10 categories (9 tool groups + 4 meta-tools) for comprehensive OBS Studio control. All tools communicate with OBS via WebSocket (default port 4455) and return structured JSON responses.
+The agentic-obs MCP server provides 94 tools organized into 10 categories (9 tool groups + 4 meta-tools) for comprehensive OBS Studio control. All tools communicate with OBS via WebSocket (default port 4455) and return structured JSON responses.
 
 | Category | Tools | Description | Tool Group |
 |----------|-------|-------------|------------|

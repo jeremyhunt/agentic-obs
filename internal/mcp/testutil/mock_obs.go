@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/andreykaipov/goobs/api/typedefs"
@@ -68,12 +69,15 @@ type MockOBSClient struct {
 	inputKinds          []string                                   // available input kinds
 	inputDefaults       map[string]map[string]interface{}          // input kind -> default settings
 	buttonPresses       []string                                   // recorded "source:property" presses
+	vendorCalls         []VendorCall                               // recorded vendor requests
+	vendorResponses     map[string]map[string]any                  // "vendor/request" -> response
 	nextSceneItemID     int                                        // counter for new scene items
 
 	// Error injection for design tools
 	ErrorOnSetInputMute               error
 	ErrorOnGetVideoSettings           error
 	ErrorOnCreateSceneItem            error
+	ErrorOnCallVendorRequest          error
 	ErrorOnSetSourceSettings          error
 	ErrorOnGetInputDefaultSettings    error
 	ErrorOnPressInputPropertiesButton error
@@ -2698,4 +2702,72 @@ func (m *MockOBSClient) CreateSceneItem(sceneName, sourceName string, enabled bo
 	m.sceneItemLocked[sceneName][id] = false
 
 	return id, nil
+}
+
+// VendorCall records one CallVendorRequest, so a test can assert what was sent
+// rather than only what came back. (FB-77)
+type VendorCall struct {
+	VendorName  string
+	RequestType string
+	RequestData map[string]any
+}
+
+// CallVendorRequest simulates a vendor request.
+//
+// Vendors cannot be enumerated in OBS, so an unknown vendor is an error rather
+// than an empty result -- the only way to learn a plugin is missing is to ask
+// and be refused, and a test double that quietly succeeded would hide that.
+func (m *MockOBSClient) CallVendorRequest(vendorName, requestType string, data map[string]any) (map[string]any, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.ErrorOnCallVendorRequest != nil {
+		return nil, m.ErrorOnCallVendorRequest
+	}
+
+	if !m.connected {
+		return nil, fmt.Errorf("not connected to OBS")
+	}
+
+	m.vendorCalls = append(m.vendorCalls, VendorCall{
+		VendorName: vendorName, RequestType: requestType, RequestData: data,
+	})
+
+	if m.vendorResponses == nil {
+		m.vendorResponses = map[string]map[string]any{}
+	}
+	if resp, ok := m.vendorResponses[vendorName+"/"+requestType]; ok {
+		return resp, nil
+	}
+
+	// A vendor the test seeded at all is installed; one it did not is not.
+	for key := range m.vendorResponses {
+		if strings.HasPrefix(key, vendorName+"/") {
+			return map[string]any{}, nil
+		}
+	}
+	if vendorName == "obs-browser" {
+		// Always present: obs-browser registers its vendor in every OBS build
+		// that ships the browser source, which is all of them.
+		return map[string]any{}, nil
+	}
+
+	return nil, fmt.Errorf("no vendor named '%s' is registered; the plugin may not be installed", vendorName)
+}
+
+// SetVendorResponse seeds what a vendor request returns.
+func (m *MockOBSClient) SetVendorResponse(vendorName, requestType string, response map[string]any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.vendorResponses == nil {
+		m.vendorResponses = map[string]map[string]any{}
+	}
+	m.vendorResponses[vendorName+"/"+requestType] = response
+}
+
+// VendorCalls returns the vendor requests made so far.
+func (m *MockOBSClient) VendorCalls() []VendorCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]VendorCall(nil), m.vendorCalls...)
 }

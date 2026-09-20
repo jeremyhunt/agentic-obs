@@ -137,6 +137,21 @@ func eventFrom(raw any, at time.Time) (Event, bool) {
 			"enabled": e.StudioModeEnabled,
 		})
 
+	// Vendor events
+	case *events.VendorEvent:
+		// The payload is passed through rather than interpreted. A vendor's
+		// event data is defined by the plugin that emits it, so anything this
+		// layer did to it would be a guess about someone else's schema.
+		data := e.EventData
+		if data == nil {
+			data = map[string]any{}
+		}
+		return ev(EventTypeVendorEvent, map[string]interface{}{
+			"vendor_name": e.VendorName,
+			"event_type":  e.EventType,
+			"event_data":  data,
+		})
+
 	case *events.CurrentPreviewSceneChanged:
 		return ev(EventTypePreviewSceneChanged, map[string]interface{}{
 			"scene_name": e.SceneName, "action": "preview_changed",

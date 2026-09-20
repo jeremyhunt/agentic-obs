@@ -32,6 +32,7 @@ var composedRoles = []reflect.Type{
 	reflect.TypeOf((*obs.CanvasReader)(nil)).Elem(),
 	reflect.TypeOf((*obs.ScenePresetOperator)(nil)).Elem(),
 	reflect.TypeOf((*obs.AdvancedSceneSwitcherController)(nil)).Elem(),
+	reflect.TypeOf((*obs.VendorCaller)(nil)).Elem(),
 	reflect.TypeOf((*obs.EventSource)(nil)).Elem(),
 }
 
@@ -70,8 +71,8 @@ func TestOBSClientIsExactlyTheUnionOfRoles(t *testing.T) {
 
 	// A count that only ever moves deliberately. If this is the only failure,
 	// the surface grew or shrank and the rest of the suite agreed -- update it.
-	if len(onInterface) != 83 {
-		t.Errorf("OBSClient exposes %d methods, expected 83", len(onInterface))
+	if len(onInterface) != 84 {
+		t.Errorf("OBSClient exposes %d methods, expected 84", len(onInterface))
 	}
 }
 

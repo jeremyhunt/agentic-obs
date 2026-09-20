@@ -31,6 +31,7 @@ var allEventTypes = []EventType{
 	EventTypeTransitionStarted,
 	EventTypeStudioModeChanged,
 	EventTypePreviewSceneChanged,
+	EventTypeVendorEvent,
 }
 
 // TestAllEventTypesIsComplete makes the hand-list above trustworthy.
@@ -144,7 +145,7 @@ func TestOnlyResourceAffectingEventsTriggerUpdates(t *testing.T) {
 // arrive from a subscription mask deliberately wider than the set translated
 // here, so an unrecognised type is routine rather than exceptional.
 func TestUnknownEventTypesDoNotTriggerUpdates(t *testing.T) {
-	for _, et := range []EventType{"", "source_filter_enabled", "vendor_event", "not_a_real_event"} {
+	for _, et := range []EventType{"", "source_filter_enabled", "not_a_real_event"} {
 		if ShouldTriggerResourceUpdated(et) {
 			t.Errorf("unrecognised event %q triggered a resource update", et)
 		}

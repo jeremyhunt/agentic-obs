@@ -34,6 +34,7 @@ type OBSClient interface {
 	obs.CanvasReader
 	obs.ScenePresetOperator
 	obs.AdvancedSceneSwitcherController
+	obs.VendorCaller
 	obs.EventSource
 }
 
