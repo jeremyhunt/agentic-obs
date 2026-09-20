@@ -7,6 +7,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Nested scenes are modelled, not assumed (FB-79)** — four contract rows for a
+  scene placed inside another scene, which is the shape the live collection is
+  actually built from: all ten of its containers are nested scenes, not groups,
+  following obs-websocket's own advice that "using groups is discouraged; nested
+  scenes are recommended". The rows fix which halves of the input contract a
+  scene keeps, because `capture_scene_spec` has to branch on exactly that.
+
+  Each row started as a documentation lookup rather than a guess. libobs settles
+  it: "a scene is a source which contains and renders other sources using
+  specific transforms and/or filtering" (`reference-scenes.rst`). So a nested
+  scene is placed and transformed like any other source, and it carries filters
+  like any other source — which is why obs-websocket's filter requests take the
+  generic `sourceName` rather than `inputName`. It is *not* an input: the
+  protocol's error table types the word outright, `InvalidInputKind` (605) being
+  "the specified input (`obs_source_t-OBS_SOURCE_TYPE_INPUT`) had the wrong
+  kind", and a scene is `OBS_SOURCE_TYPE_SCENE`. A spec that captured scenes and
+  inputs alike would try to re-create every container as an input. The fourth
+  row pins that a scene cannot contain itself, since
+  `obs_source_add_active_child` returns "false if it causes recursion" and a
+  spec is a document that can ask for one.
+
+  `obstest.Fake` could not represent any of this. `CreateSceneItem` required
+  `world.inputs[sourceName]`, so a nested scene could not be placed at all, and
+  filters resolved against inputs only — the fake could not model the collection
+  it stands in for. Scenes are now filter hosts and placeable sources, while
+  staying out of `ListSources` and `GetSourceSettings`, which is the distinction
+  that matters. All four rows pass against OBS 32.2.2.
+
+### Fixed
+- **The live contract suite no longer panics at random (FB-79)** — it opened a
+  connection per row and disconnected at the end of each, and goobs v1.8.3
+  panics on disconnect if the server pushes a message at the wrong moment:
+  `client.go:351-368` checks whether `Disconnected` is closed and then sends on
+  `Opcodes`, but `markDisconnected` closes both, so a message arriving between
+  the check and the send is a send on a closed channel. It is a panic in goobs'
+  own goroutine, so it cannot be recovered from here — it fails the whole run.
+  Every row creates and removes scenes, inputs and filters, so OBS is nearly
+  always emitting an event as a row tears down, which is exactly the window the
+  race needs. Row isolation is a property of the fixture — a fresh scratch scene
+  per row — and never needed a socket of its own, so the suite now connects once
+  instead of twenty-seven times. Six consecutive clean runs, against one panic
+  in four before.
+
 - **Contract test suite for the OBS client (FB-58)** — `internal/obs/obstest`
   holds one behavioural contract run against two implementations: an in-memory
   fake in CI, and a real obs-websocket connection under `go test -tags obslive`

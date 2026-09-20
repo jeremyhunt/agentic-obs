@@ -401,6 +401,154 @@ func RunContract(t *testing.T, newClient NewClient) {
 			t.Errorf("expected an error creating a second input named %q", fx.SourceName)
 		}
 	})
+	// Nested scenes. Every container in the live collection is a nested scene
+	// rather than a group -- obs-websocket's own guidance is "using groups is
+	// discouraged; nested scenes are recommended" -- so a scene spec's primary
+	// case is a scene placed inside another scene, not an input.
+	//
+	// libobs is unambiguous that this is one kind of thing wearing two hats:
+	// "a scene is a source which contains and renders other sources using
+	// specific transforms and/or filtering" (docs/sphinx/reference-scenes.rst),
+	// and obs_scene_get_source hands you the obs_source_t to prove it. These
+	// rows pin which halves of the input contract a scene keeps, because the
+	// capture branches on exactly that.
+	t.Run("a nested scene is placed and transformed like any other source", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// The layered model rests on this: a placement references a source, and
+		// the transform belongs to the placement. Neither Get nor
+		// SetSceneItemTransform names a source kind -- they address
+		// (scene, sceneItemId) -- so a nested scene's transform must round-trip
+		// exactly as an input's does, including the bounds normalisation that
+		// FB-64 added. If it does not, SceneItemSpec needs a second transform
+		// path and the whole spec model changes shape.
+		parent := fx.SceneName + "-parent"
+		if err := client.CreateScene(parent); err != nil {
+			t.Fatalf("CreateScene: %v", err)
+		}
+		t.Cleanup(func() { _ = client.RemoveScene(parent) })
+
+		itemID, err := client.CreateSceneItem(parent, fx.SceneName, true)
+		if err != nil {
+			t.Fatalf("placing scene %q inside scene %q: %v\n"+
+				"a scene is a source, so it can be a scene item like any other",
+				fx.SceneName, parent, err)
+		}
+
+		got, err := client.GetSceneItemTransform(parent, itemID)
+		if err != nil {
+			t.Fatalf("GetSceneItemTransform on a nested scene: %v", err)
+		}
+
+		// The FB-64 trap, restated for scenes: OBS reports zero bounds for an
+		// item that never had a bounding box and then rejects a write of them.
+		// Read-modify-write is what triggers it, and every spec apply is a
+		// read-modify-write.
+		if err := client.SetSceneItemTransform(parent, itemID, got); err != nil {
+			t.Fatalf("a transform read straight off a nested scene was rejected on write: %v\n"+
+				"transform was %+v", err, got)
+		}
+
+		got.PositionX = 120
+		got.PositionY = 48
+		if err := client.SetSceneItemTransform(parent, itemID, got); err != nil {
+			t.Fatalf("SetSceneItemTransform on a nested scene: %v", err)
+		}
+		back, err := client.GetSceneItemTransform(parent, itemID)
+		if err != nil {
+			t.Fatalf("GetSceneItemTransform: %v", err)
+		}
+		if back.PositionX != 120 || back.PositionY != 48 {
+			t.Errorf("nested scene sits at (%v,%v) after being moved to (120,48)",
+				back.PositionX, back.PositionY)
+		}
+	})
+	t.Run("a nested scene is not an input", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// obs-websocket's vocabulary is typed, and the error table says so
+		// outright: InvalidInputKind (605) is "the specified input
+		// (obs_source_t-OBS_SOURCE_TYPE_INPUT) had the wrong kind". A scene is
+		// OBS_SOURCE_TYPE_SCENE, so the input-shaped half of the protocol does
+		// not reach it -- GetInputList does not enumerate scenes, and the
+		// settings requests that take inputName cannot resolve one.
+		//
+		// This is the branch in Capture. A SourceSpec for a nested scene has no
+		// settings and no kind to create it from; it is a reference to a scene
+		// captured in its own right. Asking OBS for its settings anyway is the
+		// mistake this row exists to make expensive.
+		inputs, err := client.ListSources()
+		if err != nil {
+			t.Fatalf("ListSources: %v", err)
+		}
+		if containsInput(inputs, fx.SceneName) {
+			t.Errorf("scene %q is listed as an input; scenes and inputs are different "+
+				"source types and a spec that treats them alike would try to "+
+				"re-create this scene as an input", fx.SceneName)
+		}
+
+		if _, err := client.GetSourceSettings(fx.SceneName); err == nil {
+			t.Errorf("GetSourceSettings returned settings for scene %q; a scene has no "+
+				"input settings, so capturing them would store something that "+
+				"cannot be applied back", fx.SceneName)
+		}
+	})
+	t.Run("a scene cannot be placed inside itself", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// libobs refuses to build a cycle: obs_source_add_active_child returns
+		// "false if it causes recursion" (docs/sphinx/reference-sources.rst),
+		// because rendering one would not terminate.
+		//
+		// A spec is a document, and a document can say anything -- including
+		// that a scene contains itself. apply_scene_spec needs this to come
+		// back as a failed op it can report, which is only true if the platform
+		// refuses rather than accepts-and-breaks. The row asserts that it
+		// fails, not which error it fails with: the refusal happens down in
+		// libobs, and the code obs-websocket chooses to surface for it is not
+		// something the docs pin down.
+		if _, err := client.CreateSceneItem(fx.SceneName, fx.SceneName, true); err == nil {
+			t.Errorf("placing scene %q inside itself was accepted; a cycle in the "+
+				"scene graph cannot be rendered", fx.SceneName)
+		}
+	})
+	t.Run("filters attach to a nested scene as they do to an input", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// The other half of "a scene is a source": obs_source_filter_add takes
+		// any obs_source_t*, and obs-websocket's filter requests take the
+		// generic sourceName rather than inputName. So a scene carries filters,
+		// and a spec that only captures filters for inputs silently drops them
+		// from every container in the collection.
+		const filterName = "contract-nested-filter"
+		if err := client.CreateSourceFilter(fx.SceneName, filterName, "color_filter_v2", nil); err != nil {
+			t.Fatalf("attaching a filter to scene %q: %v\n"+
+				"a scene is a source, so filters hang off it the same way",
+				fx.SceneName, err)
+		}
+		t.Cleanup(func() { _ = client.RemoveSourceFilter(fx.SceneName, filterName) })
+
+		filters, err := client.GetSourceFilterList(fx.SceneName)
+		if err != nil {
+			t.Fatalf("GetSourceFilterList on a scene: %v", err)
+		}
+		found := false
+		for _, flt := range filters {
+			if flt.Name == filterName {
+				found = true
+				if flt.Kind != "color_filter_v2" {
+					t.Errorf("filter on a scene reports kind %q, want color_filter_v2", flt.Kind)
+				}
+				if !flt.Enabled {
+					t.Errorf("filter on a scene reports disabled; OBS creates filters enabled")
+				}
+			}
+		}
+		if !found {
+			t.Errorf("filter %q is not listed on scene %q; the filter list holds %d entries",
+				filterName, fx.SceneName, len(filters))
+		}
+	})
 	t.Run("the canvas is reported with usable dimensions", func(t *testing.T) {
 		client, _ := newClient(t)
 

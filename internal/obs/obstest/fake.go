@@ -31,6 +31,12 @@ type world struct {
 
 type scene struct {
 	items []*sceneItem
+	// libobs: "a scene is a source which contains and renders other sources
+	// using specific transforms and/or filtering" (reference-scenes.rst). So a
+	// scene carries filters exactly as an input does, which is why
+	// obs-websocket's filter requests take the generic sourceName rather than
+	// inputName.
+	filters []*filter
 }
 
 // sceneItem is one placement of an input in a scene. Its transform and enabled
@@ -276,16 +282,45 @@ func (f *Fake) SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bo
 
 // findFilter locates a filter on a source by name.
 func (f *Fake) findFilter(sourceName, filterName string) (*filter, error) {
-	in, ok := f.world.inputs[sourceName]
-	if !ok {
-		return nil, fmt.Errorf("source %q not found", sourceName)
+	host, err := f.filterHost(sourceName)
+	if err != nil {
+		return nil, err
 	}
-	for _, flt := range in.filters {
+	for _, flt := range *host {
 		if flt.name == filterName {
 			return flt, nil
 		}
 	}
 	return nil, fmt.Errorf("filter %q not found on source %q", filterName, sourceName)
+}
+
+// filterHost returns the filter list of whichever source owns that name.
+//
+// Inputs and scenes are both obs_source_t, so both hold filters. Resolving
+// inputs first matches OBS only in order, not in meaning: an input and a scene
+// cannot share a name, so at most one lookup can hit.
+func (f *Fake) filterHost(name string) (*[]*filter, error) {
+	if in, ok := f.world.inputs[name]; ok {
+		return &in.filters, nil
+	}
+	if sc, ok := f.world.scenes[name]; ok {
+		return &sc.filters, nil
+	}
+	return nil, fmt.Errorf("source %q not found", name)
+}
+
+// sourceExists reports whether anything placeable answers to that name.
+//
+// A nested scene is the normal way to build a container in OBS -- obs-websocket
+// recommends nested scenes over groups outright -- so a fake that accepts only
+// inputs here cannot model a real collection. Every container in the collection
+// this project drives is a nested scene.
+func (f *Fake) sourceExists(name string) bool {
+	if _, ok := f.world.inputs[name]; ok {
+		return true
+	}
+	_, ok := f.world.scenes[name]
+	return ok
 }
 
 // copySettings defends the stored map from a caller that keeps mutating the one
@@ -302,17 +337,17 @@ func (f *Fake) CreateSourceFilter(sourceName, filterName, filterKind string, set
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	in, ok := f.world.inputs[sourceName]
-	if !ok {
-		return fmt.Errorf("source %q not found", sourceName)
+	host, err := f.filterHost(sourceName)
+	if err != nil {
+		return err
 	}
-	for _, flt := range in.filters {
+	for _, flt := range *host {
 		if flt.name == filterName {
 			return fmt.Errorf("resource already exists: source %q already has a filter named %q", sourceName, filterName)
 		}
 	}
 
-	in.filters = append(in.filters, &filter{
+	*host = append(*host, &filter{
 		name:     filterName,
 		kind:     filterKind,
 		enabled:  true, // OBS creates filters enabled
@@ -325,13 +360,13 @@ func (f *Fake) GetSourceFilterList(sourceName string) ([]obs.FilterInfo, error) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	in, ok := f.world.inputs[sourceName]
-	if !ok {
-		return nil, fmt.Errorf("source %q not found", sourceName)
+	host, err := f.filterHost(sourceName)
+	if err != nil {
+		return nil, err
 	}
 
-	out := make([]obs.FilterInfo, 0, len(in.filters))
-	for i, flt := range in.filters {
+	out := make([]obs.FilterInfo, 0, len(*host))
+	for i, flt := range *host {
 		out = append(out, obs.FilterInfo{Name: flt.name, Kind: flt.kind, Index: i, Enabled: flt.enabled})
 	}
 	return out, nil
@@ -346,8 +381,12 @@ func (f *Fake) GetSourceFilter(sourceName, filterName string) (*obs.FilterDetail
 		return nil, err
 	}
 
+	host, err := f.filterHost(sourceName)
+	if err != nil {
+		return nil, err
+	}
 	index := 0
-	for i, other := range f.world.inputs[sourceName].filters {
+	for i, other := range *host {
 		if other == flt {
 			index = i
 			break
@@ -404,13 +443,13 @@ func (f *Fake) RemoveSourceFilter(sourceName, filterName string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	in, ok := f.world.inputs[sourceName]
-	if !ok {
-		return fmt.Errorf("source %q not found", sourceName)
+	host, err := f.filterHost(sourceName)
+	if err != nil {
+		return err
 	}
-	for i, flt := range in.filters {
+	for i, flt := range *host {
 		if flt.name == filterName {
-			in.filters = append(in.filters[:i], in.filters[i+1:]...)
+			*host = append((*host)[:i], (*host)[i+1:]...)
 			return nil
 		}
 	}
@@ -620,8 +659,12 @@ func (f *Fake) CreateSceneItem(sceneName, sourceName string, enabled bool) (int,
 	if !ok {
 		return 0, fmt.Errorf("scene %q not found", sceneName)
 	}
-	if _, ok := f.world.inputs[sourceName]; !ok {
+	if !f.sourceExists(sourceName) {
 		return 0, fmt.Errorf("source %q not found", sourceName)
+	}
+	if sourceName == sceneName {
+		// OBS refuses to place a scene inside itself: the render would recurse.
+		return 0, fmt.Errorf("cannot place scene %q inside itself", sceneName)
 	}
 
 	f.world.nextID++
