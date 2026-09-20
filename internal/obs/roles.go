@@ -222,6 +222,18 @@ type EventSource interface {
 	SetEventCallback(callback EventCallback)
 }
 
+// GroupReader opens a group.
+//
+// Groups are a separate role rather than part of SceneReader because they are a
+// separate resource type to obs-websocket: GetSceneItemList refuses a group and
+// GetGroupSceneItemList refuses a scene, each with InvalidResourceType (602).
+// A caller has to dispatch on SceneSource.IsGroup, and a role that offered both
+// interchangeably would suggest otherwise.
+type GroupReader interface {
+	GetGroupList() ([]string, error)
+	GetGroupSceneItemList(groupName string) ([]SceneSource, error)
+}
+
 // RawRequester reaches obs-websocket requests that have no typed wrapper.
 //
 // It is the one role that is not a capability but a completeness guarantee:
@@ -267,4 +279,5 @@ var (
 	_ EventSource                     = (*Client)(nil)
 	_ VendorCaller                    = (*Client)(nil)
 	_ RawRequester                    = (*Client)(nil)
+	_ GroupReader                     = (*Client)(nil)
 )

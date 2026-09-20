@@ -22,6 +22,7 @@ type MockOBSClient struct {
 
 	// Mock data
 	scenes         []string
+	groups         map[string][]obs.SceneSource // groups and their contents
 	currentScene   string
 	sources        []*typedefs.Input
 	sceneItems     map[string][]obs.SceneSource

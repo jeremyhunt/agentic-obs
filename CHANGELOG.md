@@ -7,6 +7,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Scene specs, read side (FB-82)** — `internal/scenespec` captures a scene as
+  a document and `capture_scene_spec` returns it inline. The spec separates what
+  a source *is* from where it is *placed*, because OBS does: an input is a shared
+  object and a scene item is one reference to it. This collection places
+  `jurmiey_avatar` twice in a single scene and shares eleven sources across up to
+  five scenes, so a flat list of placements each carrying its own settings cannot
+  round-trip — an apply would write one source's settings several times, fighting
+  itself, or drop a placement. Sources are captured once each, and the expensive
+  calls are per source, so `Game`'s twelve placements cost nine settings reads.
+
+  The three source types carry the weight. An **input** has a kind and settings.
+  A **nested scene** has neither, and is referenced rather than expanded — that
+  scene is captured in its own right, since expanding here would duplicate it
+  into every spec referencing it and recurse forever on a cycle. A **group** has
+  neither either, its children belong to the group rather than to any placement
+  of it, and its contents open only through `GetGroupSceneItemList`. Dispatch is
+  on `isGroup`, never on `sourceType`: both containers report
+  `OBS_SOURCE_TYPE_SCENE` and each list call refuses the other's argument with
+  `602`. Filters are captured for all three, because a scene and a group are both
+  `obs_source_t`, and reading them only for inputs would silently drop filter
+  state from most containers here.
+
+  `include_settings` and `include_filters` make a lighter document for reading a
+  layout, and **the spec records what they omitted** — a partial document says so
+  rather than being indistinguishable from a scene that has no filters.
+
+  Verified against the live collection: 11 scenes, 84 source entries, 85
+  placements, exercising groups, nested scenes and repeated placements.
+
+### Fixed
+- **The group requests were on the client but on no role (FB-82)** — FB-80 added
+  `GetGroupList` and `GetGroupSceneItemList` to `*obs.Client` without putting
+  them on a role, so `mcp.OBSClient` could not see them at all.
+  `TestOBSClientIsExactlyTheUnionOfRoles` only catches the reverse direction — a
+  method on the interface belonging to no role. `obs.GroupReader` is that role,
+  kept separate from `SceneReader` because offering both list calls
+  interchangeably would suggest a caller can pick either.
+
 - **Every obs-websocket request is reachable (FB-81)** — `call_obs_request`
   issues any request by name, and `list_obs_requests` reports what the connected
   build supports. Measured against the live server: obs-websocket 5.7.4 offers

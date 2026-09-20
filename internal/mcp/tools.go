@@ -483,6 +483,14 @@ func (s *Server) registerToolHandlers() {
 
 		mcpsdk.AddTool(s.mcpServer,
 			&mcpsdk.Tool{
+				Name:        "capture_scene_spec",
+				Description: "Capture a scene as a document: what each source is, captured once, and where each is placed. Separates sources from placements so a source shared across scenes, or placed twice in one, round-trips correctly. Returns the spec inline",
+			},
+			s.handleCaptureSceneSpec,
+		)
+
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
 				Name:        "call_obs_request",
 				Description: "Issue any obs-websocket request by name. The completeness escape hatch: the typed tools cover about 65 of the protocol's 151 requests, and this reaches the rest, including media playback, profiles, scene collections, projectors, stats and generic outputs",
 			},
