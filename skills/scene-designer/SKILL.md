@@ -36,6 +36,38 @@ Activate the **scene-designer** skill when users request help with:
   - "Set up picture-in-picture"
   - "Build an intermission scene"
 
+## The loop
+
+Design is not a calculation you get right first time. It is a loop, and the
+verify step is the one that was missing:
+
+1. **Read the canvas** -- `get_obs_status`, use `video.base_width` /
+   `video.base_height`. Never assume a resolution.
+2. **Make it exist** -- `ensure_input` rather than `create_*` when the source
+   may already be there. It is safe to re-run and tells you whether it created,
+   placed, updated or changed nothing.
+3. **Place it** -- `set_source_transform` with a `fit` block. Say the intent;
+   OBS does the scaling.
+4. **Look at it** -- `take_screenshot`. Actually look. This is not optional and
+   it is not a formality.
+5. **Adjust and repeat** from 3.
+
+### Always verify visually
+
+`take_screenshot` returns the image in the same turn, so you can see what you
+just did rather than reason about whether it should have worked.
+
+Do it after every placement, and look for the things coordinates cannot tell
+you: a source off-canvas, a transparent background rendering black, text clipped
+by its bounding box, a layer in front of something it should be behind.
+
+Pass `width` to keep it cheap -- a full-resolution capture of a 2560x1440 canvas
+is about 1.4 MB, the same frame at `width: 1280` is around 500 KB, and as JPEG
+around 56 KB. Placement is just as legible at the smaller sizes.
+
+If you have not looked at a screenshot, you do not know the layout is right; you
+know the call returned success, which is a different claim.
+
 ## Core Responsibilities
 
 As the **scene-designer**, your role is to:
@@ -50,12 +82,27 @@ As the **scene-designer**, your role is to:
 
 ## Available Tools
 
-### Source Creation (5 tools)
+### Source Creation (6 tools)
+- `ensure_input` - **Prefer this.** Create-or-update for any kind: makes a
+  source exist in a scene with the settings you describe, whatever state things
+  are in. Safe to re-run; reports `created`, `placed`, `updated` or `unchanged`.
+  The `create_*` tools below fail when the name is taken unless you pass
+  `if_exists`.
 - `create_text_source` - Add text overlays with customizable font, size, color
 - `create_image_source` - Add static images (PNG, JPG, etc.)
 - `create_color_source` - Add solid color rectangles (backgrounds, overlays)
 - `create_browser_source` - Add web content (alerts, widgets, animations)
 - `create_media_source` - Add video/audio files with optional looping
+
+### Seeing your work (1 tool)
+- `take_screenshot` - Capture a source or scene and get the image back in the
+  same turn. The verify step of every loop above.
+
+### Configuration (2 tools)
+- `set_source_settings` - Change what a source *is* (a browser source's URL, a
+  text source's text, an image's file), as distinct from where it sits
+- `get_input_default_settings` - Discover a kind's settings keys instead of
+  guessing them
 
 ### Transform & Layout (4 tools)
 - `set_source_transform` - Position (x, y), scale, and rotate sources
@@ -95,19 +142,47 @@ OBS uses a coordinate system with:
 - **Origin (0, 0)**: Top-left corner
 - **X-axis**: Increases rightward
 - **Y-axis**: Increases downward
-- **Default canvas**: Usually 1920x1080 (Full HD) or 2560x1440 (1440p)
 
-### Common Positions (1920x1080 canvas)
+### Read the canvas; never assume it
 
-| Position | Coordinates |
-|----------|-------------|
-| Top-left | x: 0, y: 0 |
-| Top-center | x: 960, y: 0 |
-| Top-right | x: 1920, y: 0 |
-| Center | x: 960, y: 540 |
-| Bottom-left | x: 0, y: 1080 |
-| Bottom-center | x: 960, y: 1080 |
-| Bottom-right | x: 1920, y: 1080 |
+**Always call `get_obs_status` first and use `video.base_width` /
+`video.base_height`.** This skill used to carry a table of coordinates for a
+1920x1080 canvas. That table was wrong on the machine it was written for, whose
+canvas is 2560x1440 -- every placement computed from it landed 640x360 pixels
+off, which is enough to put a corner-anchored overlay off-screen rather than
+merely off-centre.
+
+`video.base_*` is the coordinate space scene items live in. `video.output_*` is
+what OBS encodes after any downscale, and is **not** the space to place against:
+a source at x=2000 is on-canvas at 2560 wide even when the output is 1920.
+
+### Prefer `fit` to coordinates
+
+`set_source_transform` takes a `fit` block that places against the canvas
+without you computing anything:
+
+```json
+{ "scene_name": "Live", "source_name": "Webcam",
+  "fit": { "mode": "fill", "anchor": "bottom-right",
+           "region": { "x": 1920, "y": 1080, "width": 640, "height": 360 } } }
+```
+
+| mode | what OBS does |
+|------|---------------|
+| `fit` | whole source visible inside the region, letterboxed |
+| `fill` | covers the region, overflowing edges cropped |
+| `stretch` | fills the region, aspect ratio ignored |
+| `width` / `height` | matches that dimension, the other follows |
+| `shrink` | scales down to fit, never up |
+| `none` | clears the bounding box (for assets already authored at canvas size) |
+
+Omit `region` to mean the whole canvas. `anchor` decides where the source sits
+when the mode leaves spare space: `center` (default), `top-left`, `top`,
+`top-right`, `left`, `right`, `bottom-left`, `bottom`, `bottom-right`.
+
+These map onto OBS's own bounding-box types, so OBS does the scaling. That is
+why `fit` keeps working when an asset is swapped for one of a different size,
+and hand-computed coordinates do not.
 
 ### Scale Values
 - `1.0` = 100% (original size)
@@ -342,31 +417,31 @@ Text/graphics in bottom portion:
    - Position left of text
 ```
 
-## Transform Calculations
+## Placement
 
-### Centering a Source
+### Let OBS do the arithmetic
 
-To center a source on canvas:
-```
-center_x = (canvas_width - (source_width * scale_x)) / 2
-center_y = (canvas_height - (source_height * scale_y)) / 2
-```
+Centring and corner-anchoring used to be documented here as formulas over the
+source's width and height. Do not use them. They need a source size you often
+cannot get -- a browser source reports 0x0 until the page loads -- and they go
+stale the moment the asset behind the source is replaced.
 
-Example: Center a 1280x720 source scaled to 50%:
-```
-center_x = (1920 - (1280 * 0.5)) / 2 = 640
-center_y = (1080 - (720 * 0.5)) / 2 = 360
-```
+| Intent | Call |
+|--------|------|
+| Centre on the canvas | `fit: { mode: "fit" }` |
+| Fill the canvas, cropping overflow | `fit: { mode: "fill" }` |
+| Flush in a corner | `fit: { mode: "shrink", anchor: "bottom-right", region: {...} }` |
+| Picture-in-picture | `fit: { mode: "fit", region: { x, y, width, height } }` |
+| Full-canvas layer | `fit: { mode: "none" }` |
 
-### Corner Positioning
+The anchor is where the source sits *within its region*, so a corner placement
+is a region plus an anchor, not a computed coordinate.
 
-For a source to appear flush in a corner:
-```
-Top-left: x: 0, y: 0
-Top-right: x: canvas_width - (source_width * scale_x)
-Bottom-left: y: canvas_height - (source_height * scale_y)
-Bottom-right: Both x and y from above
-```
+### When you do need explicit coordinates
+
+`x`, `y`, `scale_x`, `scale_y` and `rotation` still work and override `fit`
+where both are given. Reach for them for a nudge relative to a known-good
+position -- not to compute a layout from scratch.
 
 ### Maintaining Aspect Ratio
 
@@ -602,7 +677,7 @@ The **scene-designer** skill may collaborate with:
 
 - **streaming-assistant**: For pre-stream layout verification
 - **preset-manager**: For saving designed layouts as presets
-- **visual-analyst**: For screenshot-based design feedback
+- **take_screenshot**: Verify your own work. See "Always verify visually" above.
 
 **Handoff Pattern**:
 ```

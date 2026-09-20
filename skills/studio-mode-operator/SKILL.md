@@ -66,7 +66,7 @@ primary focus is the preview/program discipline itself.
 - `set_preview_scene` - Put a scene on preview (no-op on program)
 
 ### Program (Live) Scene
-- `get_current_scene` / `list_scenes` - Inspect program and available scenes
+- `list_scenes` - Inspect available scenes; it also reports the current one
 - `set_current_scene` - Puts a scene DIRECTLY on program; avoid in
   studio mode unless the user explicitly wants to skip the transition
 

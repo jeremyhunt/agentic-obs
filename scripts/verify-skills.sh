@@ -258,6 +258,50 @@ fi
 # Summary
 echo ""
 echo "=========================================="
+
+# ---------------------------------------------------------------------------
+# Every tool named in a "Tools used" line must actually exist.
+#
+# skills/README.md named six tools that did not: remove_source_from_scene,
+# set_source_index, set_source_blend_mode, set_source_visible,
+# get_scene_item_id and get_current_scene. A skill telling an agent to call a
+# tool that is not there is worse than one that says nothing -- the agent
+# follows it and the call fails.
+#
+# Only "Tools used" lines are checked. Skill prose is full of backticked field
+# names, enum values and filter kinds, and treating those as tool names gives
+# noise rather than a gate. (FB-76)
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Tool Name Validity ---"
+
+HELP_FILE="internal/mcp/help_tools.go"
+if [ ! -f "$HELP_FILE" ]; then
+    echo -e "  ${YELLOW}Skipped${NC} - $HELP_FILE not found"
+else
+    REAL_TOOLS=$(grep -oE '"[a-z][a-z0-9_]+": `#' "$HELP_FILE" | sed 's/": `#//; s/"//')
+    UNKNOWN_TOOLS=""
+
+    while IFS= read -r line; do
+        for name in $(echo "$line" | grep -oE '`[a-z][a-z0-9_]+`' | tr -d '`'); do
+            if ! echo "$REAL_TOOLS" | grep -qx "$name"; then
+                UNKNOWN_TOOLS="$UNKNOWN_TOOLS $name"
+            fi
+        done
+    done < <(grep -rh "Tools used" skills/ 2>/dev/null)
+
+    if [ -n "$UNKNOWN_TOOLS" ]; then
+        echo -e "  ${RED}ISSUES FOUND${NC} - named in a 'Tools used' line but not a registered tool:"
+        for name in $(echo "$UNKNOWN_TOOLS" | tr ' ' '
+' | sort -u); do
+            [ -n "$name" ] && echo -e "    ${YELLOW}→${NC} $name"
+        done
+        ISSUES_FOUND=$((ISSUES_FOUND + 1))
+    else
+        echo -e "  Checking: tool names in 'Tools used' lines... ${GREEN}OK${NC}"
+    fi
+fi
+
 if [ $ISSUES_FOUND -eq 0 ]; then
     echo -e "${GREEN}All skill validation checks passed!${NC}"
     echo ""
@@ -266,6 +310,7 @@ if [ $ISSUES_FOUND -eq 0 ]; then
     echo "  - All SKILL.md files have valid frontmatter"
     echo "  - All required sections are present"
     echo "  - skills/README.md references all skills"
+    echo "  - Every tool named in a 'Tools used' line exists"
     exit 0
 else
     echo -e "${RED}Skill validation issues found - please review above${NC}"
