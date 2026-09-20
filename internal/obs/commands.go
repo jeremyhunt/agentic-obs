@@ -370,6 +370,29 @@ func (c *Client) SetSceneItemEnabled(sceneName string, sceneItemID int, enabled 
 	return nil
 }
 
+// GetSceneItemEnabled reports whether a scene item is currently visible.
+//
+// This is the reader that pairs with SetSceneItemEnabled. Without it a caller
+// could only discover an item's visibility by toggling it, or by listing the
+// whole scene -- which is why ToggleSourceVisibility used to make this request
+// inline. (FB-60)
+func (c *Client) GetSceneItemEnabled(sceneName string, sceneItemID int) (bool, error) {
+	client, err := c.getClient()
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := client.SceneItems.GetSceneItemEnabled(&sceneitems.GetSceneItemEnabledParams{
+		SceneName:   &sceneName,
+		SceneItemId: &sceneItemID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to get visibility state for item %d in scene '%s': %w", sceneItemID, sceneName, err)
+	}
+
+	return resp.SceneItemEnabled, nil
+}
+
 // ToggleSourceVisibility toggles the visibility of a source in a specific scene.
 func (c *Client) ToggleSourceVisibility(sceneName string, sourceID int) (bool, error) {
 	client, err := c.getClient()
@@ -377,18 +400,15 @@ func (c *Client) ToggleSourceVisibility(sceneName string, sourceID int) (bool, e
 		return false, err
 	}
 
-	// First get the current state
-	sceneItemIDInt := sourceID
-	getResp, err := client.SceneItems.GetSceneItemEnabled(&sceneitems.GetSceneItemEnabledParams{
-		SceneName:   &sceneName,
-		SceneItemId: &sceneItemIDInt,
-	})
+	// Read, then invert. Prefer SetSceneItemEnabled wherever the caller knows the
+	// state it wants -- a toggle cannot be retried safely.
+	current, err := c.GetSceneItemEnabled(sceneName, sourceID)
 	if err != nil {
-		return false, fmt.Errorf("failed to get visibility state for source %d in scene '%s': %w", sourceID, sceneName, err)
+		return false, err
 	}
 
-	// Toggle the state
-	newState := !getResp.SceneItemEnabled
+	sceneItemIDInt := sourceID
+	newState := !current
 	newStateBool := newState
 	_, err = client.SceneItems.SetSceneItemEnabled(&sceneitems.SetSceneItemEnabledParams{
 		SceneName:        &sceneName,
