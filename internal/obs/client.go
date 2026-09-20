@@ -17,9 +17,10 @@ import (
 // Client wraps the OBS WebSocket client with connection management and state tracking.
 type Client struct {
 	// Connection configuration
-	host     string
-	port     string
-	password string
+	host               string
+	port               string
+	password           string
+	eventSubscriptions int
 
 	// OBS client instance
 	client *goobs.Client
@@ -43,6 +44,37 @@ type ConnectionConfig struct {
 	Host     string
 	Port     string
 	Password string
+
+	// EventSubscriptions is the obs-websocket event mask to connect with.
+	// Zero means "unset" and takes DefaultEventSubscriptions(); to receive no
+	// events at all, pass subscriptions.None explicitly via a non-zero mask
+	// combination, or simply register no callback.
+	EventSubscriptions int
+}
+
+// DefaultEventSubscriptions is the event mask the client connects with unless a
+// ConnectionConfig overrides it.
+//
+// A category is excluded when it is high-volume and unused: obs-websocket will
+// push SceneItemTransformChanged for every frame of a drag, and
+// InputVolumeMeters tens of times a second, whether or not anyone is listening.
+//
+// Filters and Vendors are included ahead of any handler, which is deliberate and
+// worth stating because it inverts the usual order. An unsubscribed category is
+// not an error anywhere -- no log line, no failure, just an event that never
+// arrives -- so a handler written for one looks correct forever while doing
+// nothing. Both are low-frequency (a filter toggle, a plugin emitting), so the
+// cost of subscribing early is nil and the cost of forgetting is a defect that
+// takes a live OBS to find.
+func DefaultEventSubscriptions() int {
+	return subscriptions.Scenes | // Scene creation, removal, and switching
+		subscriptions.Outputs | // Recording, Streaming, VirtualCam, ReplayBuffer
+		subscriptions.Inputs | // Audio mute/volume changes
+		subscriptions.SceneItems | // Source visibility changes
+		subscriptions.Transitions | // Scene transition events
+		subscriptions.Ui | // Studio mode changes
+		subscriptions.Filters | // Filter enable/settings changes
+		subscriptions.Vendors // VendorEvent: the only inbound channel from a plugin
 }
 
 // EventCallback is the interface for handling OBS events and triggering MCP notifications.
@@ -88,14 +120,20 @@ type EventCallback interface {
 func NewClient(config ConnectionConfig) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	subs := config.EventSubscriptions
+	if subs == 0 {
+		subs = DefaultEventSubscriptions()
+	}
+
 	return &Client{
-		host:      config.Host,
-		port:      config.Port,
-		password:  config.Password,
-		connected: false,
-		reconnect: true,
-		ctx:       ctx,
-		cancel:    cancel,
+		host:               config.Host,
+		port:               config.Port,
+		password:           config.Password,
+		eventSubscriptions: subs,
+		connected:          false,
+		reconnect:          true,
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 }
 
@@ -134,16 +172,11 @@ func (c *Client) Connect() error {
 	var client *goobs.Client
 	var err error
 
-	// Build connection options - subscribe to event categories needed for automation
+	// Build connection options. The mask is decided once, at construction, so
+	// a reconnect cannot quietly come back with a different subscription set
+	// than the one the caller asked for.
 	opts := []goobs.Option{
-		goobs.WithEventSubscriptions(
-			subscriptions.Scenes | // Scene creation, removal, and switching
-				subscriptions.Outputs | // Recording, Streaming, VirtualCam, ReplayBuffer
-				subscriptions.Inputs | // Audio mute/volume changes
-				subscriptions.SceneItems | // Source visibility changes
-				subscriptions.Transitions | // Scene transition events
-				subscriptions.Ui, // Studio mode changes
-		),
+		goobs.WithEventSubscriptions(c.eventSubscriptions),
 	}
 
 	if c.password != "" {
