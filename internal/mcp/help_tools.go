@@ -1024,6 +1024,20 @@ just as legible at 1280 and costs a quarter as much.`,
 - scale_x (float, optional): X scale factor (1.0 = 100%)
 - scale_y (float, optional): Y scale factor (1.0 = 100%)
 - rotation (float, optional): Rotation in degrees
+- fit (object, optional): Place by intent instead of coordinates. Reads the
+  canvas itself, so you do not need to know the resolution.
+  - mode (string, required): fit (whole source visible, letterboxed), fill
+    (covers the region, overflow cropped), stretch (ignores aspect ratio),
+    width, height, shrink (scales down to fit but never up), or none (clears
+    the bounding box).
+  - region (object, optional): {x, y, width, height} in canvas pixels. The
+    whole canvas when omitted.
+  - anchor (string, optional): Where the source sits in its region when there
+    is spare space -- center (default), top-left, top, top-right, left, right,
+    bottom-left, bottom, bottom-right.
+
+  These map onto OBS's own bounding-box types, so OBS does the scaling. Explicit
+  x/y/scale_x/scale_y still win where both are given.
 
 **Output**:
 - scene_name: Scene name

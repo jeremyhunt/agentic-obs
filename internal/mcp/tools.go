@@ -183,8 +183,8 @@ type CreateBrowserSourceInput struct {
 	// holding a connection across scene switches -- obs_wire.py depends on it
 	// staying off for exactly that reason -- so it is never defaulted, only set
 	// when a caller asks. (FB-72)
-	RestartWhenActive *bool `json:"restart_when_active,omitempty" jsonschema:"Reload the page each time the source becomes visible; breaks overlays that hold a connection"`
-	IfExists   string `json:"if_exists,omitempty" jsonschema:"What to do if the source already exists: error (default), update, or skip"`
+	RestartWhenActive *bool  `json:"restart_when_active,omitempty" jsonschema:"Reload the page each time the source becomes visible; breaks overlays that hold a connection"`
+	IfExists          string `json:"if_exists,omitempty" jsonschema:"What to do if the source already exists: error (default), update, or skip"`
 }
 
 // CreateMediaSourceInput is the input for creating a media/video source
@@ -194,6 +194,26 @@ type CreateMediaSourceInput struct {
 	FilePath   string `json:"file_path" jsonschema:"Path to the media file"`
 	Loop       bool   `json:"loop,omitempty" jsonschema:"Whether to loop the media (default: false)"`
 	IfExists   string `json:"if_exists,omitempty" jsonschema:"What to do if the source already exists: error (default), update, or skip"`
+}
+
+// RegionInput is a rectangle in canvas coordinates.
+type RegionInput struct {
+	X      float64 `json:"x" jsonschema:"Left edge in canvas pixels"`
+	Y      float64 `json:"y" jsonschema:"Top edge in canvas pixels"`
+	Width  float64 `json:"width" jsonschema:"Region width in canvas pixels"`
+	Height float64 `json:"height" jsonschema:"Region height in canvas pixels"`
+}
+
+// FitInput describes a placement instead of computing one.
+//
+// Say what should happen -- fit inside, cover, stretch -- and OBS does the
+// arithmetic through its bounding box. The alternative, computing a scale
+// factor from the source's own dimensions, divides by zero before a browser
+// source has loaded and goes stale the moment the asset is replaced. (FB-75)
+type FitInput struct {
+	Mode   string       `json:"mode" jsonschema:"fit (whole source visible), fill (covers, overflow cropped), stretch (ignores aspect), width, height, shrink (never scale up), or none"`
+	Region *RegionInput `json:"region,omitempty" jsonschema:"Where on the canvas; the whole canvas when omitted"`
+	Anchor string       `json:"anchor,omitempty" jsonschema:"Where the source sits in its region when there is spare space: center (default), top-left, top, top-right, left, right, bottom-left, bottom, bottom-right"`
 }
 
 // SetSourceTransformInput is the input for setting source transform properties
@@ -206,6 +226,9 @@ type SetSourceTransformInput struct {
 	ScaleX      *float64 `json:"scale_x,omitempty" jsonschema:"X scale factor (1.0 = 100%)"`
 	ScaleY      *float64 `json:"scale_y,omitempty" jsonschema:"Y scale factor (1.0 = 100%)"`
 	Rotation    *float64 `json:"rotation,omitempty" jsonschema:"Rotation in degrees"`
+	// Fit resolves a placement against the live canvas. Explicit x/y/scale
+	// values still win where both are given.
+	Fit *FitInput `json:"fit,omitempty" jsonschema:"Place by intent against the canvas instead of by coordinates"`
 }
 
 // GetSourceTransformInput is the input for getting source transform properties
@@ -2240,6 +2263,16 @@ func (s *Server) handleSetSourceTransform(ctx context.Context, request *mcpsdk.C
 	if err != nil {
 		s.recordAction("set_source_transform", "Set source transform", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to get current transform: %w", err)
+	}
+
+	// A fit resolves against the live canvas first, so explicit coordinates
+	// below still override whatever it decided. Supplying both is a caller
+	// mistake, and the explicit number is the more specific request.
+	if input.Fit != nil {
+		if err := s.applyFit(current, input.Fit); err != nil {
+			s.recordAction("set_source_transform", "Set source transform", input, nil, false, time.Since(start))
+			return nil, nil, err
+		}
 	}
 
 	// Apply changes only for provided values
