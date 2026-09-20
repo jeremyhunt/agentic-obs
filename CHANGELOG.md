@@ -28,6 +28,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`automation-setup` prompt (FB-20 follow-up)** — 14th MCP workflow prompt; guides users through creating, testing, and monitoring automation rules. Accepts optional `rule_type` ('event'|'schedule') and `trigger_event` arguments for targeted guidance.
 
 ### Fixed
+- **Resource update notifications reached no client (FB-57)** — no
+  `SubscribeHandler` was set, so the SDK advertised `resources.subscribe=false`
+  and `ResourceUpdated`, which delivers only to sessions in the server's
+  subscription set, had an empty set to deliver to. The fan-out logged "Sent
+  resource updated notification" while sending nothing. Both handlers are now
+  wired, and the tests assert on what an in-memory client actually receives rather
+  than on what the server believed it sent. ADR-003's notification promise now
+  holds.
+- **Source visibility changes did not update the scene resource (FB-57)** —
+  `ShouldTriggerResourceUpdated` mapped only `scene_changed`, so a client
+  subscribed to `obs://scene/{name}` was never told when the contents of that
+  scene changed, even though the resource includes per-item visibility.
 - **Intermittent `TestEngineCooldown` failure (FB-56, closes FB-37)** — the test
   slept for exactly as long as the cooldown it was waiting out, so it raced the
   boundary and failed at `-count>=3`. The engine's cooldown decisions now read the
