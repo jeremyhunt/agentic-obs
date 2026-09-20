@@ -133,43 +133,72 @@ func RunContract(t *testing.T, newClient NewClient) {
 				second.Width, second.Height, second.SourceWidth, second.SourceHeight)
 		}
 	})
-	t.Run("rejects an empty bounds type", func(t *testing.T) {
+	t.Run("unset bounds are normalised rather than rejected", func(t *testing.T) {
 		client, fx := newClient(t)
 
-		// Found by running this contract against a real OBS: obs-websocket
-		// answers RequestFieldEmpty (403) "The field value of `boundsType` must
-		// not be empty", while the fake accepted it silently. goobs marshals the
-		// transform with no omitempty, so an unset BoundsType goes on the wire as
-		// "" rather than being omitted.
+		// FB-58 found that obs-websocket rejects an empty boundsType
+		// (RequestFieldEmpty, 403) and any bounds dimension below 1
+		// (RequestFieldOutOfRange, 402) -- the latter even under
+		// OBS_BOUNDS_NONE, where the dimensions are inert. goobs marshals
+		// without omitempty, so unset fields are transmitted as zero rather than
+		// omitted, and both rules bite.
 		//
-		// Production paths read-modify-write and so always carry a real bounds
-		// type, but anything constructing a transform from scratch -- applying a
-		// stored scene spec, for one -- will hit this. (FB-58)
-		err := client.SetSceneItemTransform(fx.SceneName, fx.SceneItemID, &obs.SceneItemTransform{
-			ScaleX: 1, ScaleY: 1, BoundsWidth: 1, BoundsHeight: 1,
-		})
-		if err == nil {
-			t.Error("expected an error for an empty bounds type; OBS rejects it, so the fake must too")
+		// Those rows asserted the rejection. FB-64 showed that was the wrong
+		// place to stop: OBS reports zero bounds for any item that never had a
+		// bounding box, so enforcing the wire rule meant OBS would not accept
+		// its own output. The client normalises instead, and this row is the
+		// statement of that -- a transform with nothing said about bounds is
+		// writable.
+		if err := client.SetSceneItemTransform(fx.SceneName, fx.SceneItemID, &obs.SceneItemTransform{
+			ScaleX: 1, ScaleY: 1,
+		}); err != nil {
+			t.Fatalf("a transform with unset bounds was rejected: %v", err)
+		}
+
+		got, err := client.GetSceneItemTransform(fx.SceneName, fx.SceneItemID)
+		if err != nil {
+			t.Fatalf("GetSceneItemTransform: %v", err)
+		}
+		if got.BoundsType != obs.BoundsTypeNone {
+			t.Errorf("bounds type read back as %q, want %q", got.BoundsType, obs.BoundsTypeNone)
 		}
 	})
-	t.Run("rejects bounds dimensions below one", func(t *testing.T) {
+	t.Run("a real bounds mode with an impossible size is still rejected", func(t *testing.T) {
 		client, fx := newClient(t)
 
-		// The second divergence this contract found against a real OBS:
-		// RequestFieldOutOfRange (402) "The field value of `boundsWidth` is below
-		// the minimum of `1.000000`". It applies even with OBS_BOUNDS_NONE, where
-		// the dimensions are not used for anything -- because goobs sends every
-		// field, so zero is transmitted rather than omitted.
-		//
-		// Together with the empty-boundsType rule this means a transform built
-		// from scratch needs a bounds type and non-zero bounds dimensions, or the
-		// write fails with a message that names a field the caller never set.
-		// apply_scene_spec will construct transforms from scratch. (FB-58)
+		// Normalisation applies only where bounds are unused. Asking for a
+		// bounding box of zero width is a caller error, not an unset field, and
+		// must not be silently turned into a one-pixel box.
 		err := client.SetSceneItemTransform(fx.SceneName, fx.SceneItemID, &obs.SceneItemTransform{
-			ScaleX: 1, ScaleY: 1, BoundsType: "OBS_BOUNDS_NONE",
+			ScaleX: 1, ScaleY: 1,
+			BoundsType: "OBS_BOUNDS_SCALE_INNER", BoundsWidth: 0, BoundsHeight: 600,
 		})
 		if err == nil {
-			t.Error("expected an error for zero bounds dimensions; OBS requires at least 1")
+			t.Error("expected an error for a zero-width bounding box under a real bounds mode")
+		}
+	})
+	t.Run("a transform read back can be written back unchanged", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// Read-modify-write is what every transform tool does: get_source_transform,
+		// change one field, set_source_transform. That only works if what OBS hands
+		// back is something OBS will accept.
+		//
+		// It is not obviously true. goobs sends every field with no omitempty, and
+		// obs-websocket rejects boundsWidth below 1 -- so if a freshly created item
+		// reports bounds of zero, reading its transform and writing it straight
+		// back is rejected for a field the caller never touched. This row is the
+		// cheapest possible statement of the invariant the tools rely on. (FB-64)
+		got, err := client.GetSceneItemTransform(fx.SceneName, fx.SceneItemID)
+		if err != nil {
+			t.Fatalf("GetSceneItemTransform: %v", err)
+		}
+
+		if err := client.SetSceneItemTransform(fx.SceneName, fx.SceneItemID, got); err != nil {
+			t.Fatalf("a transform read straight from OBS was rejected on write: %v\n"+
+				"read-modify-write is the pattern every transform tool uses, so this "+
+				"breaks set_source_transform, set_source_crop and set_source_bounds "+
+				"on any item whose transform reports this shape:\n  %+v", err, got)
 		}
 	})
 	t.Run("setting enabled is idempotent, not a toggle", func(t *testing.T) {

@@ -845,7 +845,43 @@ func (c *Client) GetSceneItemTransform(sceneName string, sceneItemID int) (*Scen
 // because goobs marshals this struct with no omitempty and obs-websocket applies
 // any key present -- so a field left at its zero value here is transmitted and
 // applied, not skipped. (FB-54)
+// BoundsTypeNone is the bounds mode OBS uses when an item has no bounding box.
+// With it set, the bounds dimensions are ignored entirely.
+const BoundsTypeNone = "OBS_BOUNDS_NONE"
+
+// NormaliseBounds makes a transform writable.
+//
+// OBS reports bounds of zero for any item that has never had a bounding box --
+// which is most items -- but obs-websocket rejects a write whose boundsWidth or
+// boundsHeight is below 1, and goobs sends every field because it marshals
+// without omitempty. The result is that a transform read straight out of OBS
+// cannot be written back: read-modify-write, which is what every transform tool
+// does, failed with RequestFieldOutOfRange naming a field the caller never
+// touched. (FB-64)
+//
+// The dimensions are only forced when bounds are unused, so a caller that asks
+// for a real bounds mode with a nonsense size still gets OBS's error rather than
+// a silently resized bounding box. With OBS_BOUNDS_NONE the values are inert.
+func NormaliseBounds(boundsType string, width, height float64) (string, float64, float64) {
+	if boundsType == "" {
+		boundsType = BoundsTypeNone
+	}
+	if boundsType != BoundsTypeNone {
+		return boundsType, width, height
+	}
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	return boundsType, width, height
+}
+
 func toGoobsTransform(transform *SceneItemTransform) *typedefs.SceneItemTransform {
+	boundsType, boundsWidth, boundsHeight := NormaliseBounds(
+		transform.BoundsType, transform.BoundsWidth, transform.BoundsHeight)
+
 	return &typedefs.SceneItemTransform{
 		PositionX:       transform.PositionX,
 		PositionY:       transform.PositionY,
@@ -853,10 +889,10 @@ func toGoobsTransform(transform *SceneItemTransform) *typedefs.SceneItemTransfor
 		ScaleY:          transform.ScaleY,
 		Rotation:        transform.Rotation,
 		Alignment:       float64(transform.Alignment),
-		BoundsType:      transform.BoundsType,
+		BoundsType:      boundsType,
 		BoundsAlignment: float64(transform.BoundsAlignment),
-		BoundsWidth:     transform.BoundsWidth,
-		BoundsHeight:    transform.BoundsHeight,
+		BoundsWidth:     boundsWidth,
+		BoundsHeight:    boundsHeight,
 		CropToBounds:    transform.CropToBounds,
 		CropTop:         float64(transform.CropTop),
 		CropBottom:      float64(transform.CropBottom),
