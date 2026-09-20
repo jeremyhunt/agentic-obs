@@ -673,6 +673,8 @@ func (c *Client) GetOBSStatus() (*OBSStatus, error) {
 		FrameTime:        statsResp.AverageFrameRenderTime,
 		Frames:           int(statsResp.OutputTotalFrames),
 		DroppedFrames:    int(statsResp.OutputSkippedFrames),
+
+		SupportedImageFormats: versionResp.SupportedImageFormats,
 	}
 
 	// Non-fatal, like the scene name above: a status report without the canvas
@@ -729,6 +731,11 @@ type OBSStatus struct {
 	// read, which is not fatal: everything else in the status is still useful,
 	// and failing the whole call over it would be worse than omitting it.
 	Video *VideoSettings `json:"video,omitempty"`
+
+	// SupportedImageFormats is what this OBS build can produce for a
+	// screenshot. It comes from Qt's image writers and so varies by build,
+	// which is why it is reported rather than assumed. (FB-73)
+	SupportedImageFormats []string `json:"supported_image_formats,omitempty"`
 }
 
 // VideoSettings describes OBS's canvas and frame rate.

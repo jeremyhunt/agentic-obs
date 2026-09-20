@@ -774,8 +774,16 @@ func (s *Server) registerToolHandlers() {
 			s.handleConfigureScreenshotCadence,
 		)
 
-		toolCount += 4
-		log.Println("Visual tools registered (4 tools)")
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
+				Name:        "take_screenshot",
+				Description: "Capture a source or scene right now and return the image, so you can see the result of a change in the same turn",
+			},
+			s.handleTakeScreenshot,
+		)
+
+		toolCount += 5
+		log.Println("Visual tools registered (5 tools)")
 	}
 
 	// Design tools: Source creation and manipulation

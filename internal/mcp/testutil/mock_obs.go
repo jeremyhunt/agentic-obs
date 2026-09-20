@@ -1046,6 +1046,10 @@ func (m *MockOBSClient) GetOBSStatus() (*obs.OBSStatus, error) {
 		Frames:           10000,
 		DroppedFrames:    5,
 		Video:            m.videoSettings(),
+		// What OBS 32.2.2 reports on this machine. webp is in the list on
+		// purpose: a hardcoded png/jpg/bmp allow-list refused it, which is the
+		// bug this fixture exists to keep fixed. (FB-73)
+		SupportedImageFormats: []string{"bmp", "jpeg", "jpg", "png", "webp"},
 	}, nil
 }
 
