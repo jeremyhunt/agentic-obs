@@ -37,5 +37,14 @@ jobs:
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out ./...
 
+      # Tool counts and help entries live in Go source, so a Go-only change can
+      # break documentation consistency without touching a .md file. docs-check
+      # only triggers on markdown paths, so it would never see it. (FB-52)
+      - name: Verify documentation consistency
+        run: ./scripts/verify-docs.sh
+
+      - name: Verify skills
+        run: ./scripts/verify-skills.sh
+
       - name: Display coverage
         run: go tool cover -func=coverage.out

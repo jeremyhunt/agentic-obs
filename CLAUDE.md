@@ -43,8 +43,8 @@ agentic-obs/
 
 | Component | Package | Version |
 |-----------|---------|---------|
-| MCP SDK | `github.com/modelcontextprotocol/go-sdk` | 1.1.0 |
-| OBS Client | `github.com/andreykaipov/goobs` | 1.5.6 |
+| MCP SDK | `github.com/modelcontextprotocol/go-sdk` | 1.5.0 |
+| OBS Client | `github.com/andreykaipov/goobs` | 1.8.3 |
 | SQLite | `modernc.org/sqlite` | latest |
 | TUI | `github.com/charmbracelet/bubbletea` | 1.3.3 |
 | Markdown (HTML) | `github.com/yuin/goldmark` | 1.7.x |
@@ -100,25 +100,43 @@ go test ./...
 
 ### Adding a New Tool
 
-1. Define schema in `internal/mcp/tools.go`:
+1. Define a typed input struct in `internal/mcp/tools.go`. The SDK derives the
+   JSON schema from the struct tags, so every field needs a `jsonschema` tag:
 ```go
-{
-    Name: "my_tool",
-    Description: "Does something useful",
-    InputSchema: myToolSchema,
+type MyToolInput struct {
+    SourceName string `json:"source_name" jsonschema:"Name of the source to act on"`
+    Enabled    *bool  `json:"enabled,omitempty" jsonschema:"Set explicitly; omit to toggle"`
 }
 ```
 
-2. Implement handler:
+2. Implement the handler. The input struct is the third parameter; the SDK
+   unmarshals it for you:
 ```go
-func (s *Server) handleMyTool(ctx context.Context, params json.RawMessage) (*mcpsdk.CallToolResult, error) {
+func (s *Server) handleMyTool(ctx context.Context, request *mcpsdk.CallToolRequest, input MyToolInput) (*mcpsdk.CallToolResult, any, error) {
     // Implementation
 }
 ```
 
-3. Register in `registerToolHandlers()`
+3. Register it in `registerToolHandlers()` inside the right tool-group block:
+```go
+mcpsdk.AddTool(s.mcpServer,
+    &mcpsdk.Tool{Name: "my_tool", Description: "Does something useful"},
+    s.handleMyTool,
+)
+```
 
-4. Add OBS command in `internal/obs/commands.go` if needed
+4. Add the OBS command in `internal/obs/commands.go`, the method to the
+   `OBSClient` interface in `internal/mcp/interfaces.go`, and a matching
+   `ErrorOnX` field in `internal/mcp/testutil/mock_obs.go`.
+
+5. Update the metadata that must move with it: `toolGroupMetadata` in
+   `internal/mcp/tool_config.go` (`ToolCount` **and** `ToolNames`), the counts in
+   `internal/mcp/help_content.go`, an entry in `internal/mcp/help_tools.go`, and
+   the tool's section in `docs/TOOLS.md`.
+
+6. Run `go test ./...` and `./scripts/verify-docs.sh`. The tests name anything
+   you missed — `TestHelpContentCompleteness` fails if a registered tool has no
+   help entry.
 
 ### Adding a New Resource
 
@@ -221,4 +239,4 @@ For detailed rationale, see [design/decisions/](design/decisions/).
 
 ---
 
-**Last Updated:** 2025-12-19 | **Go:** 1.25.5 | **MCP SDK:** 1.1.0 | **goobs:** 1.5.6
+**Last Updated:** 2025-12-19 | **Go:** 1.25.5 | **MCP SDK:** 1.5.0 | **goobs:** 1.8.3

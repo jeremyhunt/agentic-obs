@@ -19,6 +19,7 @@ EXPECTED_SKILLS=(
     "scene-designer"
     "audio-engineer"
     "preset-manager"
+    "studio-mode-operator"
 )
 
 # Required frontmatter fields

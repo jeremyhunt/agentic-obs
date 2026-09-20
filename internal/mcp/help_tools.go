@@ -1618,6 +1618,240 @@ var toolHelpContent = map[string]string{
 - Design (14 tools): Source creation and transform control
 - Filters (7 tools): Source filter management
 - Transitions (5 tools): Scene transition control`,
+
+	// Automation (FB-20). These had no help entries until FB-52: the group was
+	// never enabled in the shipped binary, so nobody noticed.
+	"list_automation_rules": `# list_automation_rules
+
+**Category**: Automation
+
+**Description**: List all automation rules with their triggers, actions and current state.
+
+**Input**:
+- enabled_only (bool, optional): Only return enabled rules (default: false)
+
+**Output**:
+- rules: Array of rules with name, description, enabled, trigger_type, trigger_config, actions, cooldown_ms, priority, last_run
+- count: Number of rules returned
+
+**Example Input**:
+{
+  "enabled_only": true
+}
+
+**Note**: Use get_automation_rule for the full definition of a single rule.`,
+
+	"get_automation_rule": `# get_automation_rule
+
+**Category**: Automation
+
+**Description**: Retrieve the full definition of one automation rule by name.
+
+**Input**:
+- name (string, required): Name of the automation rule to retrieve
+
+**Output**:
+- rule: Full rule definition including trigger_config and actions
+- message: Confirmation, or an error if the rule does not exist
+
+**Example Input**:
+{
+  "name": "mute-mic-on-brb"
+}`,
+
+	"create_automation_rule": `# create_automation_rule
+
+**Category**: Automation
+
+**Description**: Create an automation rule that runs a list of actions when a trigger fires.
+
+**Input**:
+- name (string, required): Unique name for the rule
+- description (string, optional): What the rule does
+- trigger_type (string, required): 'event', 'schedule', or 'manual'
+- trigger_config (object, required): For 'event', {event_type, event_filter}; for 'schedule', {schedule: "<cron>"}; for 'manual', {}
+- actions (array, required): Ordered list of {type, parameters, on_error}
+- cooldown_ms (int, optional): Minimum time between executions (default: 0)
+- priority (int, optional): Higher priority rules execute first (default: 0)
+- enabled (bool, optional): Whether the rule is active (default: true)
+
+**Event types**: scene_changed, scene_created, scene_removed, recording_started,
+recording_stopped, recording_paused, recording_resumed, recording_file_changed,
+streaming_started, streaming_stopped, virtual_cam_started, virtual_cam_stopped,
+replay_buffer_saved, input_mute_changed, source_visibility_changed,
+transition_started, studio_mode_changed
+
+**Action types**: set_scene, toggle_mute, set_mute, set_volume, toggle_visibility,
+set_visibility, start_recording, stop_recording, pause_recording, resume_recording,
+start_streaming, stop_streaming, toggle_virtual_cam, start_virtual_cam,
+stop_virtual_cam, toggle_replay_buffer, save_replay, trigger_hotkey,
+trigger_transition, set_preview_scene, delay
+
+**Output**:
+- rule: The created rule
+- message: Success confirmation
+
+**Example Input**:
+{
+  "name": "mute-mic-on-brb",
+  "trigger_type": "event",
+  "trigger_config": {"event_type": "scene_changed", "event_filter": {"scene_name": "BRB"}},
+  "actions": [{"type": "set_mute", "parameters": {"input_name": "Mic/Aux", "muted": true}}],
+  "cooldown_ms": 1000
+}
+
+**Note**: on_error accepts 'continue' (default) or 'stop'. A rule whose actions
+change the same state its trigger watches can re-trigger itself; set a cooldown.`,
+
+	"update_automation_rule": `# update_automation_rule
+
+**Category**: Automation
+
+**Description**: Update an existing rule. Only the fields you supply are changed.
+
+**Input**:
+- name (string, required): Name of the rule to update
+- new_name (string, optional): Rename the rule
+- description (string, optional): New description
+- trigger_type (string, optional): New trigger type
+- trigger_config (object, optional): New trigger configuration
+- actions (array, optional): Replacement action list
+- cooldown_ms (int, optional): New cooldown
+- priority (int, optional): New priority
+
+**Output**:
+- rule: The updated rule
+- message: Success confirmation
+
+**Example Input**:
+{
+  "name": "mute-mic-on-brb",
+  "cooldown_ms": 5000
+}
+
+**Note**: Supplying actions replaces the whole list; it is not a merge.`,
+
+	"delete_automation_rule": `# delete_automation_rule
+
+**Category**: Automation
+
+**Description**: Delete a rule and its execution history. Asks for confirmation.
+
+**Input**:
+- name (string, required): Name of the rule to delete
+
+**Output**:
+- message: Success confirmation
+
+**Example Input**:
+{
+  "name": "mute-mic-on-brb"
+}
+
+**Note**: Irreversible, and execution history goes with it. To stop a rule
+temporarily use disable_automation_rule instead.`,
+
+	"enable_automation_rule": `# enable_automation_rule
+
+**Category**: Automation
+
+**Description**: Enable a rule so its trigger can fire.
+
+**Input**:
+- name (string, required): Name of the rule to enable
+
+**Output**:
+- message: Success confirmation
+
+**Example Input**:
+{
+  "name": "mute-mic-on-brb"
+}`,
+
+	"disable_automation_rule": `# disable_automation_rule
+
+**Category**: Automation
+
+**Description**: Disable a rule without deleting it. The definition and history are kept.
+
+**Input**:
+- name (string, required): Name of the rule to disable
+
+**Output**:
+- message: Success confirmation
+
+**Example Input**:
+{
+  "name": "mute-mic-on-brb"
+}`,
+
+	"trigger_automation_rule": `# trigger_automation_rule
+
+**Category**: Automation
+
+**Description**: Run a rule's actions immediately, ignoring its trigger. Useful for
+testing a rule before arming it.
+
+**Input**:
+- name (string, required): Name of the rule to trigger
+
+**Output**:
+- execution: Result of the run, including per-action status
+- message: Success confirmation
+
+**Example Input**:
+{
+  "name": "mute-mic-on-brb"
+}
+
+**Note**: Manual triggering bypasses the cooldown but still records an execution.`,
+
+	"list_rule_executions": `# list_rule_executions
+
+**Category**: Automation
+
+**Description**: List recent rule executions with status, duration and any error.
+
+**Input**:
+- rule_name (string, optional): Only show executions of this rule
+- limit (int, optional): Maximum executions to return (default: 20, max: 100)
+
+**Output**:
+- executions: Array of {rule_name, triggered_at, status, duration_ms, error}
+- count: Number returned
+
+**Example Input**:
+{
+  "rule_name": "mute-mic-on-brb",
+  "limit": 10
+}
+
+**Note**: This is the first place to look when a rule is not doing what you expect.`,
+
+	// Meta
+	"help": `# help
+
+**Category**: Meta
+
+**Description**: Get help on agentic-obs features, tools, resources, prompts and
+workflows. Always available; cannot be disabled.
+
+**Input**:
+- topic (string, optional): 'overview', 'tools', 'resources', 'prompts', 'workflows',
+  'troubleshooting', or any tool name (default: 'overview')
+- verbose (bool, optional): Include extra detail (default: false)
+
+**Output**:
+- topic: The topic requested
+- help: The help text
+- verbose: Whether verbose mode was used
+
+**Example Input**:
+{
+  "topic": "create_automation_rule"
+}
+
+**Note**: help with topic='tools' lists every tool by category.`,
 }
 
 // GetToolHelpContent returns the help text for a specific tool, or empty if not found.

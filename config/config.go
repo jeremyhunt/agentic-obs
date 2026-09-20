@@ -407,6 +407,29 @@ const (
 	EnvHTTPEnabled = "AGENTIC_OBS_HTTP_ENABLED"
 )
 
+// Aliases for the OBS connection variables, in precedence order after the
+// canonical OBS_* names. Three conventions for the same obs-websocket server are
+// already in use across tooling: obsws-python examples and several scripts use
+// OBS_WEBSOCKET_*, while obs-cli and anything built around it uses OBS_API_*.
+// Accepting them costs nothing and removes a class of "why won't it connect"
+// confusion; OBS_* remains canonical and is logged as preferred. (FB-52)
+var (
+	obsHostAliases     = []string{"OBS_WEBSOCKET_HOST", "OBS_API_HOST"}
+	obsPortAliases     = []string{"OBS_WEBSOCKET_PORT", "OBS_API_PORT"}
+	obsPasswordAliases = []string{"OBS_WEBSOCKET_PASSWORD", "OBS_API_PASSWORD"}
+)
+
+// lookupAliased returns the value of the first alias that is set, along with the
+// variable name it came from.
+func lookupAliased(aliases []string) (string, string) {
+	for _, name := range aliases {
+		if val := os.Getenv(name); val != "" {
+			return val, name
+		}
+	}
+	return "", ""
+}
+
 // ApplyEnvOverrides applies environment variable overrides to the configuration.
 // Environment variables take precedence over database-stored values.
 // Returns true if any overrides were applied.
@@ -417,18 +440,30 @@ func (c *Config) ApplyEnvOverrides() bool {
 		c.OBSHost = val
 		applied = true
 		log.Printf("Config override: %s=%s", EnvOBSHost, val)
+	} else if val, name := lookupAliased(obsHostAliases); val != "" {
+		c.OBSHost = val
+		applied = true
+		log.Printf("Config override: %s=%s (alias, prefer %s)", name, val, EnvOBSHost)
 	}
 
 	if val := os.Getenv(EnvOBSPort); val != "" {
 		c.OBSPort = val
 		applied = true
 		log.Printf("Config override: %s=%s", EnvOBSPort, val)
+	} else if val, name := lookupAliased(obsPortAliases); val != "" {
+		c.OBSPort = val
+		applied = true
+		log.Printf("Config override: %s=%s (alias, prefer %s)", name, val, EnvOBSPort)
 	}
 
 	if val := os.Getenv(EnvOBSPassword); val != "" {
 		c.OBSPassword = val
 		applied = true
 		log.Printf("Config override: %s=<redacted>", EnvOBSPassword)
+	} else if val, name := lookupAliased(obsPasswordAliases); val != "" {
+		c.OBSPassword = val
+		applied = true
+		log.Printf("Config override: %s=<redacted> (alias, prefer %s)", name, EnvOBSPassword)
 	}
 
 	// Check both new and legacy DB path env vars (new takes precedence)

@@ -132,6 +132,33 @@ Example Claude Desktop configuration (`claude_desktop_config.json`):
 }
 ```
 
+### Environment Variables
+
+Connection settings are read from the database first, then overridden by the
+environment. The canonical names are `OBS_*`:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `OBS_HOST` | obs-websocket host | `localhost` |
+| `OBS_PORT` | obs-websocket port | `4455` |
+| `OBS_PASSWORD` | obs-websocket password | empty |
+| `AGENTIC_OBS_DB` | SQLite database path | `~/.agentic-obs/db.sqlite` |
+| `AGENTIC_OBS_HTTP_ENABLED` | Enable the local web dashboard | `true` |
+| `AGENTIC_OBS_HTTP_PORT` | Web dashboard port | `8765` |
+
+Two other naming conventions for the same obs-websocket server are in common use,
+and both are accepted as aliases when the canonical name is unset:
+
+| Canonical | Aliases, in precedence order |
+| --- | --- |
+| `OBS_HOST` | `OBS_WEBSOCKET_HOST`, `OBS_API_HOST` |
+| `OBS_PORT` | `OBS_WEBSOCKET_PORT`, `OBS_API_PORT` |
+| `OBS_PASSWORD` | `OBS_WEBSOCKET_PASSWORD`, `OBS_API_PASSWORD` |
+
+`OBS_WEBSOCKET_*` is what `obsws-python` examples use; `OBS_API_*` is `obs-cli`'s
+convention. When an alias supplies a value, the server logs which one it used and
+names the canonical variable to prefer.
+
 ## Available MCP Tools
 
 ### Scene Management (4 tools)

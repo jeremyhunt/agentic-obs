@@ -1602,7 +1602,7 @@ The Help tool provides built-in documentation and guidance for using agentic-obs
 | Topic | Description |
 |-------|-------------|
 | `overview` | Quick start guide and feature summary |
-| `tools` | List of all 45 tools by category |
+| `tools` | List of every tool by category |
 | `resources` | MCP resource types and URI patterns |
 | `prompts` | Available workflow prompts |
 | `workflows` | Common workflow patterns and best practices |

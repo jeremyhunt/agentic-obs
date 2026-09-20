@@ -89,16 +89,7 @@ func main() {
 		HTTPHost:          cfg.WebServer.Host,
 		HTTPPort:          cfg.WebServer.Port,
 		ThumbnailCacheSec: cfg.WebServer.ThumbnailCacheSec,
-		ToolGroups: mcp.ToolGroupConfig{
-			Core:        cfg.ToolGroups.Core,
-			Visual:      cfg.ToolGroups.Visual,
-			Layout:      cfg.ToolGroups.Layout,
-			Audio:       cfg.ToolGroups.Audio,
-			Sources:     cfg.ToolGroups.Sources,
-			Design:      cfg.ToolGroups.Design,
-			Filters:     cfg.ToolGroups.Filters,
-			Transitions: cfg.ToolGroups.Transitions,
-		},
+		ToolGroups:        toolGroupsFromConfig(cfg.ToolGroups),
 	}
 
 	server, err := mcp.NewServer(serverConfig)
@@ -343,4 +334,27 @@ Examples:
 
 For more information, see: https://github.com/ironystock/agentic-obs
 `, appName, appName, appName, appName, appName)
+}
+
+// toolGroupsFromConfig converts the user-facing tool group config into the MCP
+// server's equivalent.
+//
+// Every field of config.ToolGroupConfig must be copied here. Forgetting one
+// silently disables that group's tools in the shipped binary, because the zero
+// value of a bool is false. Automation was missing here until FB-52, which meant
+// the automation engine never started and its nine tools were never registered
+// outside of tests. TestToolGroupsFromConfigCopiesEveryField guards against a
+// repeat.
+func toolGroupsFromConfig(c config.ToolGroupConfig) mcp.ToolGroupConfig {
+	return mcp.ToolGroupConfig{
+		Core:        c.Core,
+		Visual:      c.Visual,
+		Layout:      c.Layout,
+		Audio:       c.Audio,
+		Sources:     c.Sources,
+		Design:      c.Design,
+		Filters:     c.Filters,
+		Transitions: c.Transitions,
+		Automation:  c.Automation,
+	}
 }

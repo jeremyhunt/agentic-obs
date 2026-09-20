@@ -668,38 +668,17 @@ func TestHelpContentCompleteness(t *testing.T) {
 		}
 	})
 
-	t.Run("all tool names have help entries", func(t *testing.T) {
-		// List of all 57 tools that should have help
-		allTools := []string{
-			// Core (13 tools)
-			"list_scenes", "set_current_scene", "create_scene", "remove_scene",
-			"start_recording", "stop_recording", "get_recording_status", "pause_recording", "resume_recording",
-			"start_streaming", "stop_streaming", "get_streaming_status",
-			"get_obs_status",
-			// Sources (3 tools)
-			"list_sources", "toggle_source_visibility", "get_source_settings",
-			// Audio (4 tools)
-			"get_input_mute", "toggle_input_mute", "set_input_volume", "get_input_volume",
-			// Layout (6 tools)
-			"save_scene_preset", "apply_scene_preset", "list_scene_presets",
-			"get_preset_details", "rename_scene_preset", "delete_scene_preset",
-			// Visual (4 tools)
-			"create_screenshot_source", "remove_screenshot_source",
-			"list_screenshot_sources", "configure_screenshot_cadence",
-			// Design (14 tools)
-			"create_text_source", "create_image_source", "create_color_source",
-			"create_browser_source", "create_media_source",
-			"set_source_transform", "get_source_transform", "set_source_crop",
-			"set_source_bounds", "set_source_order",
-			"set_source_locked", "duplicate_source", "remove_source", "list_input_kinds",
-			// Filters (7 tools)
-			"list_source_filters", "get_source_filter", "create_source_filter",
-			"remove_source_filter", "toggle_source_filter", "set_source_filter_settings",
-			"list_filter_kinds",
-			// Transitions (5 tools)
-			"list_transitions", "get_current_transition", "set_current_transition",
-			"set_transition_duration", "trigger_transition",
+	t.Run("every registered tool has a help entry", func(t *testing.T) {
+		// Derived from toolGroupMetadata rather than a hand-maintained list. The
+		// previous literal named 56 tools (and called Core "13 tools" when it has
+		// 25), so it only ever checked the tools somebody remembered to add. (FB-52)
+		var allTools []string
+		for _, group := range toolGroupMetadata {
+			allTools = append(allTools, group.ToolNames...)
 		}
+		allTools = append(allTools, MetaToolNames...)
+
+		require.NotEmpty(t, allTools, "toolGroupMetadata must name its tools")
 
 		for _, toolName := range allTools {
 			help, err := getToolHelp(toolName, false)

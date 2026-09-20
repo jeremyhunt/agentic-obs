@@ -7,6 +7,7 @@ on:
       - 'skills/**'
       - 'scripts/verify-docs.sh'
       - 'scripts/verify-skills.sh'
+      - 'internal/mcp/**'
   push:
     branches:
       - main
@@ -15,6 +16,7 @@ on:
       - 'skills/**'
       - 'scripts/verify-docs.sh'
       - 'scripts/verify-skills.sh'
+      - 'internal/mcp/**'
 
 jobs:
   docs-check:
