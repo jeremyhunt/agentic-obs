@@ -8,49 +8,30 @@ import (
 	"github.com/ironystock/agentic-obs/internal/obs"
 )
 
-// OBSClient defines the interface for OBS operations used by the executor.
-// This matches the mcp.OBSClient interface.
+// OBSClient is what the executor needs from OBS.
+//
+// It used to be a hand-written near-copy of mcp.OBSClient, and the copy drifted:
+// its "Source visibility" section carried a comment asserting obs-websocket had
+// no way to set an item's visibility, long after SetSceneItemEnabled existed and
+// was in use elsewhere in this repo. The executor toggled when asked to set
+// because of that comment (FB-55).
+//
+// Composing roles instead means there is nothing to keep in step. The executor
+// takes whole roles rather than individual methods, so it accepts a little more
+// than it uses -- GetInputMute's siblings, say -- in exchange for a declaration
+// that cannot drift from the client.
 type OBSClient interface {
-	// Scene operations
-	SetCurrentScene(name string) error
-
-	// Recording operations
-	StartRecording() error
-	StopRecording() (string, error)
-	PauseRecording() error
-	ResumeRecording() error
-
-	// Streaming operations
-	StartStreaming() error
-	StopStreaming() error
-
-	// Audio operations
-	GetInputMute(inputName string) (bool, error)
-	ToggleInputMute(inputName string) error
-	SetInputVolume(inputName string, volumeDb *float64, volumeMul *float64) error
-
-	// Source visibility
-	ToggleSourceVisibility(sceneName string, sourceID int) (bool, error)
-	SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error
-
-	// Virtual camera operations
-	ToggleVirtualCam() (bool, error)
-	StartVirtualCam() error
-	StopVirtualCam() error
-
-	// Replay buffer operations
-	ToggleReplayBuffer() (bool, error)
-	SaveReplayBuffer() error
-
-	// Studio mode operations
-	SetCurrentPreviewScene(sceneName string) error
-	TriggerStudioModeTransition() error
-
-	// Hotkey operations
-	TriggerHotkeyByName(hotkeyName string) error
-
-	// Event handling (needed for automation bridge)
-	SetEventCallback(callback obs.EventCallback)
+	obs.SceneWriter
+	obs.SceneItemWriter
+	obs.AudioController
+	obs.RecordingController
+	obs.StreamingController
+	obs.VirtualCamController
+	obs.ReplayBufferController
+	obs.StudioController
+	obs.TransitionController
+	obs.HotkeyTrigger
+	obs.EventSource
 }
 
 // Executor handles action execution against OBS.
