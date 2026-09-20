@@ -15,7 +15,7 @@ import (
 // registers its handlers on a real SDK server, without touching storage, OBS or
 // HTTP. This is the only place in the tests that exercises registerToolHandlers;
 // everything else calls handlers directly.
-func newRegisteredServer(t *testing.T, groups ToolGroupConfig) *Server {
+func newRegisteredServerWith(t *testing.T, configure func(*Server)) *Server {
 	t.Helper()
 
 	mock := testutil.NewMockOBSClient()
@@ -24,7 +24,10 @@ func newRegisteredServer(t *testing.T, groups ToolGroupConfig) *Server {
 	s := &Server{
 		obsClient:  mock,
 		ctx:        context.Background(),
-		toolGroups: groups,
+		toolGroups: DefaultToolGroupConfig(),
+	}
+	if configure != nil {
+		configure(s)
 	}
 	s.mcpServer = mcpsdk.NewServer(
 		&mcpsdk.Implementation{Name: "agentic-obs-test", Version: "test"},
@@ -33,6 +36,11 @@ func newRegisteredServer(t *testing.T, groups ToolGroupConfig) *Server {
 	s.registerToolHandlers()
 
 	return s
+}
+
+func newRegisteredServer(t *testing.T, groups ToolGroupConfig) *Server {
+	t.Helper()
+	return newRegisteredServerWith(t, func(s *Server) { s.toolGroups = groups })
 }
 
 // servedToolNames connects an in-memory client and asks the server what tools it
@@ -62,36 +70,19 @@ func servedToolNames(t *testing.T, s *Server) []string {
 }
 
 // declaredToolNames returns every tool name the metadata claims, for the groups
-// that are enabled, plus the always-on meta tools.
-func declaredToolNames(groups ToolGroupConfig) []string {
+// the server currently has enabled, plus the always-on meta tools.
+//
+// Group enablement is read through the server's own getGroupEnabled rather than a
+// switch here: a switch would be one more hand-maintained list of group names,
+// which is the failure mode this whole test file exists to prevent. (FB-52)
+func declaredToolNames(s *Server) []string {
 	var names []string
 	for _, group := range ToolGroupOrder {
 		meta, ok := toolGroupMetadata[group]
 		if !ok {
 			continue
 		}
-		enabled := false
-		switch group {
-		case "Core":
-			enabled = groups.Core
-		case "Sources":
-			enabled = groups.Sources
-		case "Audio":
-			enabled = groups.Audio
-		case "Layout":
-			enabled = groups.Layout
-		case "Visual":
-			enabled = groups.Visual
-		case "Design":
-			enabled = groups.Design
-		case "Filters":
-			enabled = groups.Filters
-		case "Transitions":
-			enabled = groups.Transitions
-		case "Automation":
-			enabled = groups.Automation
-		}
-		if enabled {
+		if s.getGroupEnabled(group) {
 			names = append(names, meta.ToolNames...)
 		}
 	}
@@ -106,7 +97,7 @@ func TestRegisteredToolsMatchMetadata(t *testing.T) {
 	s := newRegisteredServer(t, DefaultToolGroupConfig())
 
 	served := servedToolNames(t, s)
-	declared := declaredToolNames(DefaultToolGroupConfig())
+	declared := declaredToolNames(s)
 
 	assertSameToolSets(t, declared, served)
 }
@@ -169,32 +160,18 @@ func TestHelpToolCountMatchesRegisteredTools(t *testing.T) {
 func TestToolGroupGatingIsReal(t *testing.T) {
 	for _, group := range ToolGroupOrder {
 		t.Run(group+" disabled", func(t *testing.T) {
-			groups := DefaultToolGroupConfig()
-			switch group {
-			case "Core":
-				groups.Core = false
-			case "Sources":
-				groups.Sources = false
-			case "Audio":
-				groups.Audio = false
-			case "Layout":
-				groups.Layout = false
-			case "Visual":
-				groups.Visual = false
-			case "Design":
-				groups.Design = false
-			case "Filters":
-				groups.Filters = false
-			case "Transitions":
-				groups.Transitions = false
-			case "Automation":
-				groups.Automation = false
+			s := newRegisteredServerWith(t, func(s *Server) {
+				s.setGroupEnabled(group, false)
+			})
+
+			served := servedToolNames(t, s)
+
+			assertSameToolSets(t, declaredToolNames(s), served)
+
+			for _, tool := range toolGroupMetadata[group].ToolNames {
+				assert.NotContains(t, served, tool,
+					"%s is disabled, so %s must not be served", group, tool)
 			}
-
-			served := servedToolNames(t, newRegisteredServer(t, groups))
-
-			assert.ElementsMatch(t, declaredToolNames(groups), served,
-				"disabling %s must remove exactly that group's tools", group)
 
 			// Meta tools can never be disabled.
 			for _, meta := range MetaToolNames {
