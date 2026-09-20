@@ -7,6 +7,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Every obs-websocket request is reachable (FB-81)** — `call_obs_request`
+  issues any request by name, and `list_obs_requests` reports what the connected
+  build supports. Measured against the live server: obs-websocket 5.7.4 offers
+  **151 requests and 147 are now reachable**, where the typed tools wrap about 65.
+
+  The registry is derived, not declared. goobs generates, per request, a params
+  type carrying `GetRequestName()` and a response type embedding
+  `api.ResponseCommon` whose exported `GetRaw()` holds the server's raw
+  `responseData`. Both shapes are exported, so reflection over the category
+  subclients reconstructs the whole request table using nothing private — no
+  fork, no `unsafe`, no second connection, and no eighty near-identical wrapper
+  files to go stale the next time OBS adds a request. Matching only goobs'
+  variadic method shape finds 78 of 147 and looks like it works, so both shapes
+  are recognised explicitly.
+
+  This opens surfaces nothing could reach before: media playback
+  (`TriggerMediaInputAction`, `SetMediaInputCursor`), profiles and scene
+  collections, projectors and the properties/filters/interact dialogs,
+  `SplitRecordFile` and `CreateRecordChapter`, `GetStats`, generic outputs,
+  `TriggerHotkeyByKeySequence` and `GetCanvasList`.
+
+  Six requests are refused here on purpose. `RemoveScene`, `RemoveInput`,
+  `RemoveSceneItem` and `RemoveSourceFilter` have tools that confirm first, and
+  routing around those while looking like a feature is the one failure mode this
+  tool could introduce; `SetCurrentSceneCollection` and `RemoveProfile` rebuild
+  or discard state that cannot be recovered from here. Each refusal names what to
+  use instead.
+
+  **The four that remain out of reach are named, not forgotten**:
+  `Get`/`SetSourcePrivateSettings` and `Get`/`SetSceneItemPrivateSettings`. OBS
+  offers them; goobs does not generate them. A live test compares the registry
+  against `GetVersion.availableRequests` on every run, so a request a future OBS
+  adds shows up as uncovered the first time the suite runs rather than whenever
+  someone next reads a design document. That test reads the server's list
+  *through* `call_obs_request`, so a broken passthrough cannot report a clean
+  bill of health.
+
 - **Groups are a distinct kind of container, and are now visible as one
   (FB-80)** — `GetGroupList` and `GetGroupSceneItemList` on the client,
   `SceneSource.IsGroup` populated, `is_group` published on `obs://scene/{name}`,

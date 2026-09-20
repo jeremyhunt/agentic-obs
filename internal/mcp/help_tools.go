@@ -201,6 +201,91 @@ var toolHelpContent = map[string]string{
 }`,
 
 	// Core - Status
+	"call_obs_request": `# call_obs_request
+
+**Category**: Core
+
+**Description**: Issue any obs-websocket request by name. This is the
+completeness escape hatch: the typed tools cover the surfaces workflows have
+asked for, and this reaches everything else. obs-websocket 5.7.4 offers 151
+requests; 147 are reachable here.
+
+Prefer a typed tool when one exists -- it validates input, converts units and
+confirms before destructive acts. Reach for this when nothing covers what you
+need.
+
+**Input**:
+- request_type (string, required): The request name, exactly as the protocol
+  spells it. Case-sensitive: "GetStats", not "getstats" or "get_stats"
+- request_data (object, optional): That request's parameters, in the protocol's
+  camelCase, e.g. {"sceneName": "Game"}. Omit for requests that take none
+
+**Output**: request_type, and response_data holding the server's reply verbatim.
+
+**Surfaces no typed tool reaches**:
+- Media playback: TriggerMediaInputAction, GetMediaInputStatus,
+  SetMediaInputCursor, OffsetMediaInputCursor
+- Profiles and collections: GetProfileList, SetCurrentProfile,
+  Get/SetProfileParameter, GetSceneCollectionList, CreateSceneCollection
+- Projectors and dialogs: OpenVideoMixProjector, OpenSourceProjector,
+  GetMonitorList, OpenInputPropertiesDialog, OpenInputFiltersDialog,
+  OpenInputInteractDialog
+- Recording: SplitRecordFile, CreateRecordChapter, Get/SetRecordDirectory
+- Telemetry: GetStats, GetSpecialInputs, GetSourceActive
+- Outputs: GetOutputList, GetOutputStatus, Start/Stop/ToggleOutput,
+  Get/SetOutputSettings
+- Stream: Get/SetStreamServiceSettings, SendStreamCaption
+- Hotkeys: TriggerHotkeyByKeySequence
+- Canvases: GetCanvasList
+
+**Refused here**: RemoveScene, RemoveInput, RemoveSceneItem, RemoveSourceFilter,
+SetCurrentSceneCollection and RemoveProfile. The first four have tools that
+confirm first; the last two rebuild or discard state that cannot be recovered
+from here.
+
+**Not reachable at all**: Get/SetSourcePrivateSettings and
+Get/SetSceneItemPrivateSettings. OBS offers them; the Go client library does not
+generate them yet.
+
+**Examples**:
+- Stats: {"request_type": "GetStats"}
+- Restart a media source: {"request_type": "TriggerMediaInputAction",
+  "request_data": {"inputName": "intro video",
+  "mediaAction": "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART"}}
+- Chapter marker: {"request_type": "CreateRecordChapter",
+  "request_data": {"chapterName": "boss fight"}}
+
+**Errors**: An unknown request_type is refused before anything is sent. A
+request OBS rejects returns its status verbatim, e.g. ResourceNotFound (600),
+so you can tell a missing object from a bad field from a refused state.
+
+**Tip**: Call list_obs_requests first if you are unsure of a name.
+`,
+
+	"list_obs_requests": `# list_obs_requests
+
+**Category**: Core
+
+**Description**: List every obs-websocket request call_obs_request can issue on
+the connected OBS build. The list comes from the running OBS, not from a table
+in this server, so it is accurate for the version actually in front of you.
+
+**Input**:
+- filter (string, optional): Case-insensitive substring, e.g. "media",
+  "profile", "record". Omit to list everything
+
+**Output**: requests (array of names), count (how many matched), total (how many
+exist), and a note on how to use them.
+
+**Examples**:
+- Everything: {}
+- Media control: {"filter": "media"}
+- Anything about outputs: {"filter": "output"}
+
+**Tip**: Parameter names and response shapes are in the obs-websocket protocol
+reference. They are camelCase, and request names are case-sensitive.
+`,
+
 	"call_vendor_request": `# call_vendor_request
 
 **Category**: Core

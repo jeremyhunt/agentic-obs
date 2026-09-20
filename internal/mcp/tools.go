@@ -483,6 +483,22 @@ func (s *Server) registerToolHandlers() {
 
 		mcpsdk.AddTool(s.mcpServer,
 			&mcpsdk.Tool{
+				Name:        "call_obs_request",
+				Description: "Issue any obs-websocket request by name. The completeness escape hatch: the typed tools cover about 65 of the protocol's 151 requests, and this reaches the rest, including media playback, profiles, scene collections, projectors, stats and generic outputs",
+			},
+			s.handleCallOBSRequest,
+		)
+
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
+				Name:        "list_obs_requests",
+				Description: "List every obs-websocket request call_obs_request can issue on the connected OBS build, optionally filtered by substring. Use this to discover a control surface before calling it",
+			},
+			s.handleListOBSRequests,
+		)
+
+		mcpsdk.AddTool(s.mcpServer,
+			&mcpsdk.Tool{
 				Name:        "call_vendor_request",
 				Description: "Call a request registered by a third-party OBS plugin or script. The extension channel for anything obs-websocket does not implement itself, such as Advanced Scene Switcher macros or obs-browser page events",
 			},

@@ -222,6 +222,16 @@ type EventSource interface {
 	SetEventCallback(callback EventCallback)
 }
 
+// RawRequester reaches obs-websocket requests that have no typed wrapper.
+//
+// It is the one role that is not a capability but a completeness guarantee:
+// every request the connected build supports is reachable through it, so a
+// surface nobody has wrapped yet is still driveable today.
+type RawRequester interface {
+	CallRequest(requestType string, requestData map[string]interface{}) (map[string]interface{}, error)
+	AvailableRequests() []string
+}
+
 // VendorCaller reaches a plugin's websocket vendor.
 //
 // This is the general form of what AdvancedSceneSwitcherController does for one
@@ -256,4 +266,5 @@ var (
 	_ AdvancedSceneSwitcherController = (*Client)(nil)
 	_ EventSource                     = (*Client)(nil)
 	_ VendorCaller                    = (*Client)(nil)
+	_ RawRequester                    = (*Client)(nil)
 )
