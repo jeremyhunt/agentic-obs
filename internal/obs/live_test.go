@@ -59,11 +59,12 @@ func envOr(key, fallback string) string {
 // fake's copy passes, the fake is telling the truth about the behaviour the
 // contract covers.
 func TestLiveClientSatisfiesContract(t *testing.T) {
-	obstest.RunContract(t, func(t *testing.T) (obstest.SceneItemClient, obstest.Fixture) {
+	obstest.RunContract(t, func(t *testing.T) (obstest.ContractClient, obstest.Fixture) {
 		client := liveClient(t)
 
 		// A scratch scene per row, so rows cannot interfere and a failure leaves
-		// nothing behind in the user's OBS.
+		// nothing behind in the user's OBS. Removing the scene also frees the
+		// input, which nothing else references.
 		scene := fmt.Sprintf("agentic-obs-contract-%d", time.Now().UnixNano())
 		if err := client.CreateScene(scene); err != nil {
 			t.Fatalf("CreateScene: %v", err)
@@ -74,11 +75,18 @@ func TestLiveClientSatisfiesContract(t *testing.T) {
 			}
 		})
 
-		itemID, err := client.CreateInput(scene, scene+"-item", "color_source_v3", nil)
+		const kind = "color_source_v3"
+		source := scene + "-item"
+		itemID, err := client.CreateInput(scene, source, kind, nil)
 		if err != nil {
 			t.Fatalf("CreateInput: %v", err)
 		}
 
-		return client, obstest.Fixture{SceneName: scene, SceneItemID: itemID}
+		return client, obstest.Fixture{
+			SceneName:   scene,
+			SourceName:  source,
+			SourceKind:  kind,
+			SceneItemID: itemID,
+		}
 	})
 }
