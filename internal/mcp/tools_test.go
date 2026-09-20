@@ -2686,3 +2686,58 @@ func TestHandleASSSetVariable(t *testing.T) {
 		assert.Equal(t, "sonic", varsSet[0].Value)
 	})
 }
+
+// TestSetSourceTransformPreservesAlignment guards the handler half of the FB-54
+// defect.
+//
+// set_source_transform, set_source_crop and set_source_bounds are all
+// read-modify-write: they fetch the current transform, change the fields the
+// caller supplied, and write the whole thing back. This asserts that round trip
+// carries alignment through untouched.
+//
+// Scope, deliberately: this runs against MockOBSClient, which stores and returns
+// obs.SceneItemTransform directly and never reaches internal/obs. It therefore
+// cannot see the wire-level half of the bug -- the goobs conversion that actually
+// sent alignment=0 and re-anchored items. That is covered by
+// TestSetTransformSendsEverySettableField in internal/obs, which fails if the
+// field is dropped on the way to goobs. Together the two cover the round trip;
+// neither does alone.
+func TestSetSourceTransformPreservesAlignment(t *testing.T) {
+	t.Run("changing only position leaves alignment alone", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		before, err := mock.GetSceneItemTransform("Scene 1", 1)
+		require.NoError(t, err)
+		require.Equal(t, 5, before.Alignment, "fixture should start at OBS's default alignment")
+
+		x := 250.0
+		_, _, err = server.handleSetSourceTransform(context.Background(), nil, SetSourceTransformInput{
+			SceneName:   "Scene 1",
+			SceneItemID: 1,
+			X:           &x,
+		})
+		require.NoError(t, err)
+
+		after, err := mock.GetSceneItemTransform("Scene 1", 1)
+		require.NoError(t, err)
+		assert.Equal(t, 250.0, after.PositionX, "the requested change should apply")
+		assert.Equal(t, 5, after.Alignment,
+			"alignment must survive a transform write; 0 would re-anchor the item to its centre")
+	})
+
+	t.Run("changing only crop leaves alignment alone", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		_, _, err := server.handleSetSourceCrop(context.Background(), nil, SetSourceCropInput{
+			SceneName:   "Scene 1",
+			SceneItemID: 1,
+			CropTop:     10,
+		})
+		require.NoError(t, err)
+
+		after, err := mock.GetSceneItemTransform("Scene 1", 1)
+		require.NoError(t, err)
+		assert.Equal(t, 10, after.CropTop)
+		assert.Equal(t, 5, after.Alignment, "set_source_crop must not re-anchor the item")
+	})
+}

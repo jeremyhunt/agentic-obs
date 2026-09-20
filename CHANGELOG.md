@@ -23,6 +23,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`automation-setup` prompt (FB-20 follow-up)** — 14th MCP workflow prompt; guides users through creating, testing, and monitoring automation rules. Accepts optional `rule_type` ('event'|'schedule') and `trigger_event` arguments for targeted guidance.
 
 ### Fixed
+- **Scene item transforms silently re-anchored items (FB-54)** — `obs.SceneItemTransform`
+  carried no `Alignment`, `BoundsAlignment` or `CropToBounds` field. goobs marshals
+  the wire struct with no `omitempty` and obs-websocket applies any transform key
+  present in a request, so those absent fields were not left alone on a write: they
+  were sent as zero and applied. Every `set_source_transform`, `set_source_crop` and
+  `set_source_bounds` call therefore sent `alignment=0` (`OBS_ALIGN_CENTER`),
+  re-anchoring any item still on the libobs default of `OBS_ALIGN_TOP|OBS_ALIGN_LEFT`
+  and shifting it on screen by half its rendered size. The three fields now round-trip,
+  the conversion is extracted as `toGoobsTransform`, and the read-only derived fields
+  (`Width`, `Height`, `SourceWidth`, `SourceHeight`) are explicitly not sent.
 - **Automation tool group was disabled in every released binary (FB-52)** —
   `main.go` copied eight of the nine `config.ToolGroups` fields into the MCP
   server's config, silently omitting `Automation`. Because the zero value of a

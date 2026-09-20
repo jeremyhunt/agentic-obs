@@ -176,14 +176,18 @@ func NewMockOBSClient() *MockOBSClient {
 		paused:    false,
 		streaming: false,
 		// Design tool mock data
+		// Alignment 5 is OBS_ALIGN_TOP|OBS_ALIGN_LEFT, the value libobs gives a new
+		// scene item. Modelling it matters: until FB-54 every transform write sent
+		// alignment=0 and re-anchored items to their centre, and the mock could not
+		// show that because it did not carry the field. (FB-54)
 		sceneItemTransforms: map[string]map[int]*obs.SceneItemTransform{
 			"Scene 1": {
-				1: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Width: 1920, Height: 1080},
-				2: {PositionX: 100, PositionY: 50, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Width: 400, Height: 100},
+				1: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: 5, Width: 1920, Height: 1080},
+				2: {PositionX: 100, PositionY: 50, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: 5, Width: 400, Height: 100},
 			},
 			"Gaming": {
-				3: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Width: 1920, Height: 1080},
-				4: {PositionX: 1600, PositionY: 800, ScaleX: 0.25, ScaleY: 0.25, Rotation: 0, Width: 320, Height: 180},
+				3: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: 5, Width: 1920, Height: 1080},
+				4: {PositionX: 1600, PositionY: 800, ScaleX: 0.25, ScaleY: 0.25, Rotation: 0, Alignment: 5, Width: 320, Height: 180},
 			},
 		},
 		sceneItemLocked: map[string]map[int]bool{
@@ -1111,8 +1115,9 @@ func (m *MockOBSClient) CreateInput(sceneName, sourceName, inputKind string, set
 	m.sceneItemTransforms[sceneName][newID] = &obs.SceneItemTransform{
 		PositionX: 0, PositionY: 0,
 		ScaleX: 1.0, ScaleY: 1.0,
-		Rotation: 0,
-		Width:    1920, Height: 1080,
+		Rotation:  0,
+		Alignment: 5, // OBS_ALIGN_TOP|OBS_ALIGN_LEFT, as libobs creates items
+		Width:     1920, Height: 1080,
 	}
 
 	// Initialize locked state
