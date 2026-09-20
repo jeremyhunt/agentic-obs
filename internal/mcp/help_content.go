@@ -14,8 +14,14 @@ import "fmt"
 //   - The script checks that documentation matches these constants
 //
 // UPDATE PROCEDURE (when adding tools/resources/prompts):
-//  1. Update the appropriate constant below
-//  2. Update HelpToolCount if total changes
+//  1. Add the tool's name to its group in toolGroupMetadata (tool_config.go).
+//     The per-group counts below derive from that; there is no second number to
+//     update.
+//  2. Update HelpToolCount. It is the one total that is still written by hand,
+//     because scripts/verify-docs.sh reads it as the documented figure. Two
+//     tests keep it honest: TestHelpToolCountMatchesRegisteredTools compares it
+//     to the tools the server actually serves over MCP, and
+//     TestTotalToolCountMatchesMetadata compares it to the sum of the groups.
 //  3. Run ./scripts/verify-docs.sh to find docs needing updates
 //  4. See scripts/DOC_UPDATE_CHECKLIST.md for full checklist
 //
@@ -24,19 +30,34 @@ const (
 	HelpToolCount     = 81 // Total MCP tools (including meta-tools)
 	HelpResourceCount = 4  // Resource types: scenes, screenshots, screenshot-url, presets
 	HelpPromptCount   = 14 // Workflow prompts
-
-	// Tool counts by category (should sum to HelpToolCount)
-	HelpCoreToolCount        = 25 // Scene management, recording, streaming, status, virtual cam, replay buffer, studio mode, hotkeys
-	HelpMetaToolCount        = 4  // Meta-tools: help, get_tool_config, set_tool_config, list_tool_groups (FB-27)
-	HelpSourcesToolCount     = 3  // Source management
-	HelpAudioToolCount       = 4  // Audio control
-	HelpLayoutToolCount      = 6  // Scene presets
-	HelpVisualToolCount      = 4  // Screenshot monitoring
-	HelpDesignToolCount      = 14 // Source creation and layout
-	HelpFiltersToolCount     = 7  // Filter management (FB-23)
-	HelpTransitionsToolCount = 5  // Transition control (FB-24)
-	HelpAutomationToolCount  = 9  // Automation rules (FB-20)
 )
+
+// Per-group tool counts, derived from toolGroupMetadata so a group's size is
+// stated in exactly one place: its ToolNames list. These were nine hand-typed
+// numbers, and Audio sat at 4 for some time after a sixth tool was added. (FB-52)
+var (
+	HelpCoreToolCount        = groupToolCount("Core")
+	HelpSourcesToolCount     = groupToolCount("Sources")
+	HelpAudioToolCount       = groupToolCount("Audio")
+	HelpLayoutToolCount      = groupToolCount("Layout")
+	HelpVisualToolCount      = groupToolCount("Visual")
+	HelpDesignToolCount      = groupToolCount("Design")
+	HelpFiltersToolCount     = groupToolCount("Filters")
+	HelpTransitionsToolCount = groupToolCount("Transitions")
+	HelpAutomationToolCount  = groupToolCount("Automation")
+	HelpMetaToolCount        = len(MetaToolNames)
+)
+
+// groupToolCount returns how many tools a group declares, or 0 if the group does
+// not exist. TestToolGroupOrderConsistency guards against a typo'd group name
+// silently yielding 0.
+func groupToolCount(group string) int {
+	meta, ok := toolGroupMetadata[group]
+	if !ok {
+		return 0
+	}
+	return meta.Count()
+}
 
 // GetOverviewHelp returns high-level overview of agentic-obs
 func GetOverviewHelp(verbose bool) string {

@@ -129,14 +129,17 @@ mcpsdk.AddTool(s.mcpServer,
    `OBSClient` interface in `internal/mcp/interfaces.go`, and a matching
    `ErrorOnX` field in `internal/mcp/testutil/mock_obs.go`.
 
-5. Update the metadata that must move with it: `toolGroupMetadata` in
-   `internal/mcp/tool_config.go` (`ToolCount` **and** `ToolNames`), the counts in
-   `internal/mcp/help_content.go`, an entry in `internal/mcp/help_tools.go`, and
-   the tool's section in `docs/TOOLS.md`.
+5. Add the tool's name to its group's `ToolNames` in `toolGroupMetadata`
+   (`internal/mcp/tool_config.go`), add a help entry to
+   `internal/mcp/help_tools.go`, and document it in `docs/TOOLS.md`. Per-group
+   counts derive from `ToolNames`, so there is no count to update; only
+   `HelpToolCount` in `internal/mcp/help_content.go` is still written by hand.
 
 6. Run `go test ./...` and `./scripts/verify-docs.sh`. The tests name anything
-   you missed — `TestHelpContentCompleteness` fails if a registered tool has no
-   help entry.
+   you missed: `TestRegisteredToolsMatchMetadata` compares the tools the server
+   actually serves over MCP against the metadata, `TestHelpToolCountMatchesRegisteredTools`
+   checks the documented total, and `TestHelpContentCompleteness` fails if a
+   registered tool has no help entry.
 
 ### Adding a New Resource
 

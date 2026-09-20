@@ -15,9 +15,13 @@ import (
 type ToolGroupMetadata struct {
 	Name        string   // Group name (e.g., "Core", "Audio")
 	Description string   // Human-readable description
-	ToolCount   int      // Number of tools in this group
 	ToolNames   []string // Tool names in this group
 }
+
+// Count returns the number of tools in the group. There is deliberately no
+// stored count field: a group's size is len(ToolNames) and nothing else, so it
+// cannot disagree with the list it describes. (FB-52)
+func (m *ToolGroupMetadata) Count() int { return len(m.ToolNames) }
 
 // ToolGroupOrder defines the canonical ordering of tool groups.
 // Used for consistent iteration and validation across the codebase.
@@ -28,7 +32,6 @@ var toolGroupMetadata = map[string]*ToolGroupMetadata{
 	"Core": {
 		Name:        "Core",
 		Description: "Core OBS tools: scenes, recording, streaming, status, virtual camera, replay buffer, studio mode, and hotkeys",
-		ToolCount:   25,
 		ToolNames: []string{
 			"list_scenes", "set_current_scene", "create_scene", "remove_scene",
 			"start_recording", "stop_recording", "get_recording_status", "pause_recording", "resume_recording",
@@ -43,31 +46,26 @@ var toolGroupMetadata = map[string]*ToolGroupMetadata{
 	"Sources": {
 		Name:        "Sources",
 		Description: "Source management: listing sources, visibility control, and settings",
-		ToolCount:   3,
 		ToolNames:   []string{"list_sources", "toggle_source_visibility", "get_source_settings"},
 	},
 	"Audio": {
 		Name:        "Audio",
 		Description: "Audio input control: mute state and volume levels",
-		ToolCount:   4,
 		ToolNames:   []string{"get_input_mute", "toggle_input_mute", "set_input_volume", "get_input_volume"},
 	},
 	"Layout": {
 		Name:        "Layout",
 		Description: "Scene preset management: save, apply, and organize source visibility presets",
-		ToolCount:   6,
 		ToolNames:   []string{"save_scene_preset", "list_scene_presets", "get_preset_details", "apply_scene_preset", "rename_scene_preset", "delete_scene_preset"},
 	},
 	"Visual": {
 		Name:        "Visual",
 		Description: "Visual monitoring: screenshot capture sources for AI visual analysis",
-		ToolCount:   4,
 		ToolNames:   []string{"create_screenshot_source", "remove_screenshot_source", "list_screenshot_sources", "configure_screenshot_cadence"},
 	},
 	"Design": {
 		Name:        "Design",
 		Description: "Scene design: create sources (text, image, browser, media) and control transforms",
-		ToolCount:   14,
 		ToolNames: []string{
 			"create_text_source", "create_image_source", "create_color_source", "create_browser_source", "create_media_source",
 			"set_source_transform", "get_source_transform", "set_source_crop", "set_source_bounds", "set_source_order",
@@ -77,19 +75,16 @@ var toolGroupMetadata = map[string]*ToolGroupMetadata{
 	"Filters": {
 		Name:        "Filters",
 		Description: "Source filter management: create, configure, and toggle filters on sources",
-		ToolCount:   7,
 		ToolNames:   []string{"list_source_filters", "get_source_filter", "create_source_filter", "remove_source_filter", "toggle_source_filter", "set_source_filter_settings", "list_filter_kinds"},
 	},
 	"Transitions": {
 		Name:        "Transitions",
 		Description: "Scene transition control: list, set, and trigger transitions",
-		ToolCount:   5,
 		ToolNames:   []string{"list_transitions", "get_current_transition", "set_current_transition", "set_transition_duration", "trigger_transition"},
 	},
 	"Automation": {
 		Name:        "Automation",
 		Description: "Automation rule management: event-triggered and scheduled actions",
-		ToolCount:   9,
 		ToolNames:   []string{"list_automation_rules", "get_automation_rule", "create_automation_rule", "update_automation_rule", "delete_automation_rule", "enable_automation_rule", "disable_automation_rule", "trigger_automation_rule", "list_rule_executions"},
 	},
 }
@@ -150,7 +145,7 @@ func (s *Server) handleGetToolConfig(ctx context.Context, request *mcpsdk.CallTo
 			Name:        meta.Name,
 			Description: meta.Description,
 			Enabled:     s.getGroupEnabled(groupName),
-			ToolCount:   meta.ToolCount,
+			ToolCount:   len(meta.ToolNames),
 		}
 
 		if input.Verbose {
@@ -225,15 +220,15 @@ func (s *Server) handleSetToolConfig(ctx context.Context, request *mcpsdk.CallTo
 		"group":          input.Group,
 		"previous_state": previousState,
 		"new_state":      input.Enabled,
-		"tools_affected": meta.ToolCount,
+		"tools_affected": len(meta.ToolNames),
 		"persisted":      persisted,
-		"message":        fmt.Sprintf("Tool group '%s' (%d tools) %s", input.Group, meta.ToolCount, action),
+		"message":        fmt.Sprintf("Tool group '%s' (%d tools) %s", input.Group, len(meta.ToolNames), action),
 	}
 
 	// Include persistence error if it occurred
 	if persistError != "" {
 		result["persist_error"] = persistError
-		result["message"] = fmt.Sprintf("Tool group '%s' (%d tools) %s (persistence failed: %s)", input.Group, meta.ToolCount, action, persistError)
+		result["message"] = fmt.Sprintf("Tool group '%s' (%d tools) %s (persistence failed: %s)", input.Group, len(meta.ToolNames), action, persistError)
 	}
 
 	// IMPORTANT: Tool filtering implementation notes
@@ -280,7 +275,7 @@ func (s *Server) handleListToolGroups(ctx context.Context, request *mcpsdk.CallT
 			Name:        meta.Name,
 			Description: meta.Description,
 			Enabled:     enabled,
-			ToolCount:   meta.ToolCount,
+			ToolCount:   len(meta.ToolNames),
 		})
 	}
 
