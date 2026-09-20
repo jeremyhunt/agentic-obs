@@ -74,6 +74,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pending increment 2a.
 
 ### Fixed
+- **A transform read from OBS could not be written back (FB-64)** —
+  `set_source_transform`, `set_source_crop` and `set_source_bounds` all read the
+  current transform, change a field, and write the whole thing back. That failed
+  on any scene item that had never been given a bounding box, which is most of
+  them: OBS reports such an item with `boundsWidth`/`boundsHeight` of zero,
+  obs-websocket rejects a write below 1 even under `OBS_BOUNDS_NONE` where the
+  dimensions are inert, and goobs marshals without `omitempty` so the zeroes go
+  on the wire. OBS refused to accept its own output, and the caller got
+  `RequestFieldOutOfRange` naming a field they never touched. `NormaliseBounds`
+  fills in only unused bounds, so a genuine bounding box of zero width is still
+  an error. Found by adding one contract row asking whether a transform read
+  back can be written back — the invariant every transform tool depends on and
+  none of them stated. Verified against OBS 32.2.2.
 - **Filter and vendor events were never subscribed (FB-62)** — the connection
   asked obs-websocket for six event categories and omitted `Filters` and
   `Vendors`. An unsubscribed category raises no error and logs nothing; the
