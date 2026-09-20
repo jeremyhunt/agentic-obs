@@ -192,12 +192,12 @@ func NewMockOBSClient() *MockOBSClient {
 		// show that because it did not carry the field. (FB-54)
 		sceneItemTransforms: map[string]map[int]*obs.SceneItemTransform{
 			"Scene 1": {
-				1: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: 5, Width: 1920, Height: 1080},
-				2: {PositionX: 100, PositionY: 50, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: 5, Width: 400, Height: 100},
+				1: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: obs.AlignTopLeft, Width: 1920, Height: 1080},
+				2: {PositionX: 100, PositionY: 50, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: obs.AlignTopLeft, Width: 400, Height: 100},
 			},
 			"Gaming": {
-				3: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: 5, Width: 1920, Height: 1080},
-				4: {PositionX: 1600, PositionY: 800, ScaleX: 0.25, ScaleY: 0.25, Rotation: 0, Alignment: 5, Width: 320, Height: 180},
+				3: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: obs.AlignTopLeft, Width: 1920, Height: 1080},
+				4: {PositionX: 1600, PositionY: 800, ScaleX: 0.25, ScaleY: 0.25, Rotation: 0, Alignment: obs.AlignTopLeft, Width: 320, Height: 180},
 			},
 		},
 		sceneItemLocked: map[string]map[int]bool{
@@ -1370,7 +1370,7 @@ func (m *MockOBSClient) CreateInput(sceneName, sourceName, inputKind string, set
 		PositionX: 0, PositionY: 0,
 		ScaleX: 1.0, ScaleY: 1.0,
 		Rotation:  0,
-		Alignment: 5, // OBS_ALIGN_TOP|OBS_ALIGN_LEFT, as libobs creates items
+		Alignment: obs.AlignTopLeft,
 		Width:     1920, Height: 1080,
 	}
 
@@ -2691,7 +2691,7 @@ func (m *MockOBSClient) CreateSceneItem(sceneName, sourceName string, enabled bo
 	if m.sceneItemTransforms[sceneName] == nil {
 		m.sceneItemTransforms[sceneName] = map[int]*obs.SceneItemTransform{}
 	}
-	m.sceneItemTransforms[sceneName][id] = &obs.SceneItemTransform{ScaleX: 1, ScaleY: 1, Alignment: 5}
+	m.sceneItemTransforms[sceneName][id] = &obs.SceneItemTransform{ScaleX: 1, ScaleY: 1, Alignment: obs.AlignTopLeft}
 	if m.sceneItemLocked[sceneName] == nil {
 		m.sceneItemLocked[sceneName] = map[int]bool{}
 	}
