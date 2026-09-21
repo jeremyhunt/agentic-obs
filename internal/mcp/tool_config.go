@@ -206,14 +206,25 @@ func (s *Server) handleSetToolConfig(ctx context.Context, request *mcpsdk.CallTo
 	s.toolGroupMutex.Lock()
 	previousState := s.getGroupEnabled(input.Group)
 	s.setGroupEnabled(input.Group, input.Enabled)
+	// Read the state back instead of echoing the request. setGroupEnabled is
+	// deliberately inert for Scripting -- its tool is registered once at
+	// startup from AGENTIC_OBS_SCRIPTING and there is nothing to flip -- so
+	// echoing input.Enabled reported a disable that did not happen. An
+	// operator who saw "disabled" and handed the session on was handing on a
+	// live run_lua_in_obs.
+	newState := s.getGroupEnabled(input.Group)
 	// Capture config snapshot while holding lock to avoid race condition
 	configSnapshot := s.convertToStorageConfig()
 	s.toolGroupMutex.Unlock()
 
-	// Persist if requested (using snapshot captured under lock)
+	took := newState == input.Enabled
+
+	// Persist if requested (using snapshot captured under lock). A change that
+	// did not take has nothing of this group's to persist, and reporting
+	// persisted=true for it would be the same lie one field over.
 	persisted := false
 	var persistError string
-	if input.Persist && s.storage != nil {
+	if input.Persist && took && s.storage != nil {
 		if err := s.storage.SaveToolGroupConfig(ctx, configSnapshot); err != nil {
 			log.Printf("Warning: failed to persist tool config: %v", err)
 			persistError = err.Error()
@@ -223,14 +234,14 @@ func (s *Server) handleSetToolConfig(ctx context.Context, request *mcpsdk.CallTo
 	}
 
 	action := "enabled"
-	if !input.Enabled {
+	if !newState {
 		action = "disabled"
 	}
 
 	result := map[string]interface{}{
 		"group":          input.Group,
 		"previous_state": previousState,
-		"new_state":      input.Enabled,
+		"new_state":      newState,
 		"tools_affected": len(meta.ToolNames),
 		"persisted":      persisted,
 		"message":        fmt.Sprintf("Tool group '%s' (%d tools) %s", input.Group, len(meta.ToolNames), action),
@@ -240,6 +251,18 @@ func (s *Server) handleSetToolConfig(ctx context.Context, request *mcpsdk.CallTo
 	if persistError != "" {
 		result["persist_error"] = persistError
 		result["message"] = fmt.Sprintf("Tool group '%s' (%d tools) %s (persistence failed: %s)", input.Group, len(meta.ToolNames), action, persistError)
+	}
+
+	// Say so plainly when the write did not take. Scripting is the only group
+	// this can happen to: it is decided when the process starts and there is
+	// no runtime state behind it.
+	if !took {
+		result["requested_state"] = input.Enabled
+		result["message"] = fmt.Sprintf(
+			"Tool group '%s' (%d tools) was NOT changed and is still %s. It is not settable at runtime: "+
+				"the scripting channel is decided when the process starts, by the 'scripting' build tag and "+
+				"AGENTIC_OBS_SCRIPTING. Restart the server with AGENTIC_OBS_SCRIPTING unset to turn it off.",
+			input.Group, len(meta.ToolNames), action)
 	}
 
 	// IMPORTANT: Tool filtering implementation notes
