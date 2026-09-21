@@ -40,9 +40,12 @@ measurements make that an answer rather than a failed run:
 | Raw goobs event dump, harness proven with a scratch scene | no vendor events at all — not a drop on the Go side |
 
 So the vendor API is unreachable because one pointer cannot be named, not
-because obslua is too weak. `call_request` is reachable and is still a dead
-end for its own reason: it returns an opaque
-`obs_websocket_request_response*` that Lua can neither read nor free.
+because obslua is too weak. `call_request` lives on that same handler and is
+closed to Lua for the identical reason — the spike never reached its probe. It
+would be a dead end regardless, and for a C++ bridge it still is: it returns an
+opaque `obs_websocket_request_response*` with no binding to read it and no
+reachable `obs_websocket_request_response_free`, so every call leaks the struct
+and its two strings. That reason is read from the header, not measured.
 
 **A second finding reframed the problem.** Iterating on an in-OBS script means
 reloading it, and nothing outside one plugin can. `obs_script_reload()` is

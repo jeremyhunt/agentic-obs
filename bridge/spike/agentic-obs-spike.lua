@@ -16,7 +16,7 @@ The probes, in order, because each depends on the one before:
          typed, and an inventory of every cast helper it offers, so the failure
          is read as the narrow fact it is
   4. vendor_register, 5. vendor_event_emit -- unreachable, blocked at 3
-  6. call_request is reachable and is a dead end (see below)
+  6. call_request -- also unreachable, same handler, so its probe never ran
   7. the reply path: a Lua settings write leaves as InputSettingsChanged
   8. the command path: a settings write from outside raises "update" here, and
      what arrives is run with loadstring
@@ -499,8 +499,9 @@ function start_transport()
 	log("transport up: commands in on %q, answers out on %q", INBOX_SOURCE, MAILBOX_SOURCE)
 end
 
--- 6 -- call_request is reachable, and is recorded here as a dead end rather
--- than a capability. It hands back a struct obs_websocket_request_response*,
+-- 6 -- call_request, which is on the same handler as everything else and so is
+-- equally unreachable: this never runs, because run_probes returns at the
+-- failed round trip above. It is kept because it would be a dead end anyway. It hands back a struct obs_websocket_request_response*,
 -- which is obs-websocket's own type and not part of libobs, so obslua has no
 -- binding to read it -- and no way to reach obs_websocket_request_response_free
 -- either, so every call leaks the struct and its two strings. Probed once so
