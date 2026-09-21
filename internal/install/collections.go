@@ -1,9 +1,15 @@
 // Package install puts the bridge script where OBS will load it.
 //
 // OBS stores the script list per scene collection, in the same JSON file that
-// holds every scene and source the user owns. That is why this package backs
-// up before it writes and refuses to run while OBS is open: OBS rewrites the
-// collection on save and would discard the edit, or worse, race it.
+// holds every scene and source the user owns. AddScript and RemoveScript modify
+// this file in place. Callers are responsible for backing up the collection
+// before editing and for refusing to edit while OBS is open (which would race
+// the collection file).
+//
+// Note: every write reformats and re-indents the whole file and alphabetizes
+// object keys (though array order is preserved), so diffs will show the entire
+// file as changed even though only the scripts list was touched. The backup
+// captures the full original state for recovery.
 package install
 
 import (
@@ -11,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -35,6 +42,10 @@ func readCollection(path string) (map[string]interface{}, error) {
 	if err := decoder.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("%s is not valid JSON: %w", path, err)
 	}
+	// Normalize null document to empty map
+	if doc == nil {
+		doc = make(map[string]interface{})
+	}
 	return doc, nil
 }
 
@@ -46,20 +57,58 @@ func writeCollection(path string, doc map[string]interface{}) error {
 	if err := encoder.Encode(doc); err != nil {
 		return fmt.Errorf("could not encode %s: %w", path, err)
 	}
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		return fmt.Errorf("could not write %s: %w", path, err)
+
+	// Write to a temp file in the same directory, then atomic rename.
+	// This ensures the collection is either fully old or fully new, never half.
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, ".tmp-collection-*.json")
+	if err != nil {
+		return fmt.Errorf("could not create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	// Clean up temp file if anything fails before rename.
+	defer func() {
+		if _, err := os.Stat(tmpPath); err == nil {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.Write(buf.Bytes()); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("could not write temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("could not close temp file: %w", err)
+	}
+
+	// Atomic rename. Within a volume, rename is atomic: the collection is
+	// either fully old bytes or fully new bytes, never corrupted partial state.
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("could not rename temp file to %s: %w", path, err)
 	}
 	return nil
 }
 
-// scriptList returns the existing entries, and whether modules existed.
-func scriptList(doc map[string]interface{}) []interface{} {
+// scriptList returns the existing entries. If scripts-tool is present but not
+// an array, it returns an error rather than silently discarding the value.
+func scriptList(doc map[string]interface{}) ([]interface{}, error) {
 	modules, _ := doc["modules"].(map[string]interface{})
 	if modules == nil {
-		return nil
+		return nil, nil
 	}
-	list, _ := modules[scriptsKey].([]interface{})
-	return list
+
+	scriptsTool, exists := modules[scriptsKey]
+	if !exists {
+		return nil, nil
+	}
+
+	// If it exists, it must be an array. Don't silently discard.
+	list, ok := scriptsTool.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("modules.%s must be an array, got %T", scriptsKey, scriptsTool)
+	}
+	return list, nil
 }
 
 func setScriptList(doc map[string]interface{}, list []interface{}) {
@@ -104,7 +153,11 @@ func AddScript(collectionPath, scriptPath string) (bool, error) {
 		return false, err
 	}
 
-	list := scriptList(doc)
+	list, err := scriptList(doc)
+	if err != nil {
+		return false, err
+	}
+
 	for _, entry := range list {
 		if entryPath(entry) == scriptPath {
 			return false, nil
@@ -131,7 +184,11 @@ func RemoveScript(collectionPath, scriptPath string) (bool, error) {
 		return false, err
 	}
 
-	list := scriptList(doc)
+	list, err := scriptList(doc)
+	if err != nil {
+		return false, err
+	}
+
 	kept := make([]interface{}, 0, len(list))
 	removed := false
 	for _, entry := range list {

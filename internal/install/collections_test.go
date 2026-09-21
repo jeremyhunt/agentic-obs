@@ -174,3 +174,52 @@ func readScripts(t *testing.T, path string) []string {
 	}
 	return out
 }
+
+func TestAddScriptRejectsNonArrayScriptsTool(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.json")
+	// Create a collection where scripts-tool is a string instead of array
+	if err := os.WriteFile(path, []byte(`{
+		"name": "Bad",
+		"modules": {
+			"scripts-tool": "not an array"
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	changed, err := AddScript(path, "C:/agentic-obs/bridge.lua")
+	if err == nil {
+		t.Fatal("AddScript should error on non-array scripts-tool, got nil")
+	}
+	if changed {
+		t.Error("changed should be false on error")
+	}
+
+	// Verify file is unchanged
+	original, _ := os.ReadFile(path)
+	if !strings.Contains(string(original), `"scripts-tool": "not an array"`) {
+		t.Error("file was modified despite error")
+	}
+}
+
+func TestAddScriptHandlesNullDocument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "null.json")
+	if err := os.WriteFile(path, []byte(`null`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Should not panic
+	changed, err := AddScript(path, "C:/agentic-obs/bridge.lua")
+	if err != nil {
+		t.Fatalf("AddScript on null document: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed should be true")
+	}
+
+	// Verify it now has the script
+	scripts := readScripts(t, path)
+	if len(scripts) != 1 || scripts[0] != "C:/agentic-obs/bridge.lua" {
+		t.Fatalf("got %v, want [C:/agentic-obs/bridge.lua]", scripts)
+	}
+}
