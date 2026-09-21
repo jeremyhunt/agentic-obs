@@ -163,13 +163,22 @@ Reads stay open: they expose nothing `get_obs_status`'s `bridge` field does not
 already report.
 
 **Two routes are still open, and are named here rather than left implicit.**
-`call_obs_request` is a raw obs-websocket passthrough — Core group,
-default-enabled, not elicited — and will issue `SetInputSettings` against any
-source; `apply_scene_spec` writes the settings of any source a caller-supplied
-spec names, once `dry_run=false`. Closing either means deciding what a
-deliberately unrestricted escape hatch may reach, which ADR-012 settled the
-other way and this ADR does not reopen. So the reservation reduces what a
-mistake reaches; it does not make the transport unreachable.
+
+- `call_obs_request` — Core group, default-enabled, not elicited — will issue
+  `SetInputSettings` against any source. ADR-012 gave it a deny-list, but
+  `deniedRequests`/`checkRequestAllowed` (`internal/obs/dispatch.go`) keys on
+  the request *type* alone and has no notion of a target, so covering this
+  would mean either denying `SetInputSettings` wholesale — it is the request
+  `set_source_settings` wraps, so the passthrough would lose a legitimate use —
+  or teaching that seam to inspect request data.
+- `apply_scene_spec` writes the settings of any source a caller-supplied spec
+  names, once `dry_run=false`. A captured spec never names the transport, which
+  belongs to no scene; a hand-authored one can.
+
+Both are design questions about what a deliberately unrestricted escape hatch
+may reach, not defects in the reservation, so this ADR records them rather than
+answering them. The reservation reduces what a mistake reaches; it does not
+make the transport unreachable.
 
 None of it is a boundary against whoever holds the obs-websocket password, who
 can write those settings directly.
