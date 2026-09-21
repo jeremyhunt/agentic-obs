@@ -246,6 +246,18 @@ an event, and an automation rule watching the scene fires on each one.
   refcounts sources, so an input goes away by itself once nothing references it
 - Apply a spec captured with include_settings or include_filters off
 
+**Layouts**: a placement may carry layout instead of, or as well as, a
+transform. It is resolved against the live canvas on every apply, so
+
+  "layout": {"mode": "stretch"}
+
+is the full-canvas layer at whatever resolution OBS is running now. A layout
+overwrites position, alignment and the bounds fields, and leaves scale, rotation
+and crop to the transform -- or to the live item, if the placement has no
+transform. An unknown mode or anchor stops the whole apply before anything is
+written: that is a malformed document, not a runtime failure, and half-applying
+it would leave a scene nobody described.
+
 **Shared URLs**: settings are written with overlay=false so the live source
 matches the document, which is right for every key the spec owns and is exactly
 what drops a key it does not. A browser source whose URL has a second writer --
@@ -294,6 +306,11 @@ an apply would act on, so a diff is the dry run.
 - renamed -- the same source (matched on uuid) under a different name. Without
   this a rename reads as one source missing and another unmanaged, and acting on
   that would recreate the source and orphan the original
+
+**Layouts are resolved first.** A placement carrying layout is compared as the
+transform that layout resolves to against the live canvas, so a scene matching
+the intent reports nothing -- and the same spec reports drift after the base
+resolution changes, which an absolute transform cannot do.
 
 **Most of the work is in what it does NOT report**:
 - A setting equal to its kind's default is absent from GetInputSettings, so a
@@ -346,10 +363,16 @@ several times, fighting itself, or drop a placement.
 **Output**: spec (the document), scene, source_count, item_count, and a note if
 anything was omitted.
 
-**One field a capture never fills in**: preserve_url_params, which names the
-query parameters of a browser source's URL that belong to another writer. Only
-you know which those are, and guessing would be worse than asking. Add it by
-hand to a source entry before storing the spec.
+**Two fields a capture never fills in**, because only the author knows them:
+
+- preserve_url_params on a source, naming the query parameters of its URL that
+  belong to another writer
+- layout on a placement, saying what the placement *means* rather than where it
+  currently sits
+
+Add either by hand before storing the spec. Guessing would be worse than asking:
+a capture cannot tell a placement that happens to cover the canvas from one that
+is meant to.
 
 **The document**:
 - version -- schema version, so a stored spec can be migrated

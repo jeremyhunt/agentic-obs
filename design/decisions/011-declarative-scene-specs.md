@@ -1,4 +1,4 @@
-# ADR-011: Declarative Scene Specs (FB-82, FB-83, FB-84, FB-89)
+# ADR-011: Declarative Scene Specs (FB-82, FB-83, FB-84, FB-89, FB-91)
 
 **Status:** Accepted
 **Date:** 2026-09-21
@@ -98,7 +98,41 @@ diff that cries wolf gets ignored exactly when it matters:
   URL as `preserve_url_params`; they are carried onto the spec's URL before
   comparing. See the note on `overlay=false` below.
 
-### 5. Apply order is fixed, because the steps depend on each other
+### 5. A placement may state intent instead of coordinates
+
+An absolute transform is a correct answer about **one** canvas, and it has no
+way to say so. The scenes this was built for are 2560x1440 stacks of
+full-canvas layers, so a document of absolute numbers becomes wrong the day the
+base resolution changes while still looking complete.
+
+So a placement may carry a `layout` -- `{mode, region?, anchor?}`, the same type
+`internal/layout` resolves for `set_source_transform{fit}`, stored verbatim
+rather than copied into a parallel shape. `{"mode": "stretch"}` with no region
+is the full-canvas layer, at whatever resolution OBS is running now.
+
+Three properties make it safe:
+
+- **It is a pre-pass, not a branch.** Layouts are resolved to concrete
+  transforms once, at the top of both `Diff` and `Apply`, so everything
+  downstream compares and writes numbers and the two cannot reach different
+  conclusions about where a placement goes. A document with no layouts pays
+  nothing.
+- **It owns seven fields and no more** -- position, alignment, bounds type,
+  bounds alignment, bounds size. Scale, rotation and crop come from the
+  placement's own transform, or from the **live** item when it has none, so a
+  placement that says only "fill the canvas" keeps the crop it already had.
+  FB-54 was exactly this class of silent loss, on alignment.
+- **An unresolvable layout stops the apply before anything is written.** An
+  unknown mode is a malformed document, not a runtime failure against a live
+  OBS, and half-applying it would leave a scene nobody described. A layout
+  *inside a group* is refused for the same reason: it would resolve against the
+  canvas while a group's children are positioned within the group, and a wrong
+  answer is worse than a refusal.
+
+A capture never emits one. It cannot tell a placement that happens to cover the
+canvas from one that is meant to.
+
+### 6. Apply order is fixed, because the steps depend on each other
 
 sources -> placements -> settings -> filters -> transform -> blend -> lock ->
 visibility -> one ordering pass -> prune.
@@ -108,7 +142,7 @@ OBS is normal -- a locked source, a moved file -- and a run that stopped without
 saying how far it got is worse than one that finished and reported four
 failures. Ops that depended on a failed op are reported `skipped` with the cause.
 
-### 6. The pre-apply capture is the undo
+### 7. The pre-apply capture is the undo
 
 An apply returns `before`: the scene as it was, captured before anything was
 written. Nothing else records what was replaced, and applying that document puts
@@ -170,11 +204,6 @@ author knows which parameters are foreign.
   `obs://spec/{name}`: until a named baseline is wanted. Specs are inline
   documents first, because the consumer that motivated this keeps its scene
   definition in a git repo, not in a server's database.
-- **A `layout` block on `ItemSpec`.** Today a placement carries an absolute
-  transform, so a spec does not survive a canvas resize. `internal/layout`
-  already resolves fit/fill/stretch/center to OBS bounds types and needs only
-  the canvas; wiring it into a spec is the remaining step. The trigger is a spec
-  that has to apply at two resolutions.
 - **A `presetToSpec` adapter.** `apply_scene_preset` still routes through
   `CaptureSceneState`/`ApplyScenePreset` on the client rather than through
   `Diff`/`Apply` with `fields=[enabled]`. Folding it in removes two methods from
@@ -196,12 +225,17 @@ author knows which parameters are foreign.
 - Dry run is the default on apply, and it is the same code path as the write.
 - An apply is recoverable: the report carries the scene as it was.
 - The two hand-rolled setup scripts become a document plus one tool call.
+- A spec written with layouts survives a canvas change: it reports drift and
+  applies back to the right size, where a spec of absolute numbers reports
+  nothing and quietly leaves every layer at the old resolution.
 
 ### Negative
 - A capture of a scene with a nested scene is incomplete on its own; the nested
   scene is a separate document, and the caller has to walk.
 - A missing group cannot be created, so a spec containing one is only fully
   applicable against a collection that already has it.
+- A layout is canvas-relative only. There is no way to express "this placement
+  is relative to that group", and the refusal says so rather than guessing.
 - Settings are all-or-nothing per source: `overlay=false` means a spec that
   omits a key resets it. `preserve_url_params` is the one exception, and it is
   narrow on purpose.

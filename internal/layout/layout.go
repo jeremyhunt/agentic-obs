@@ -24,21 +24,24 @@ type Canvas struct {
 
 // Region is a rectangle in canvas coordinates. Omit it to mean the whole canvas.
 type Region struct {
-	X      float64
-	Y      float64
-	Width  float64
-	Height float64
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
 }
 
 // Spec is a placement intent.
+// It carries JSON tags because a scene spec stores one verbatim (ADR-011). The
+// resolver's input and the stored document are deliberately one type: a second
+// copy of {mode, region, anchor} is a second place for them to disagree.
 type Spec struct {
 	// Mode is how the source should fill its region. See modeBounds.
-	Mode string
+	Mode string `json:"mode"`
 	// Region is where on the canvas; the whole canvas when nil.
-	Region *Region
+	Region *Region `json:"region,omitempty"`
 	// Anchor is where the source sits within its region when the mode leaves
 	// spare space. Empty means centre.
-	Anchor string
+	Anchor string `json:"anchor,omitempty"`
 }
 
 // Result is the transform fields a placement resolves to.
