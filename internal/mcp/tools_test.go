@@ -1086,9 +1086,14 @@ func TestHandleCreateTextSource(t *testing.T) {
 	t.Run("returns error for non-existent scene", func(t *testing.T) {
 		server, _ := testServer(t)
 
+		// A name nothing else uses. "Text" is a seeded source, and now that the
+		// double keeps one world it is a real input rather than a scene item
+		// whose source was absent from the input list -- so creating it again
+		// fails on the name before it can fail on the scene, and this test would
+		// be asserting the wrong error.
 		input := CreateTextSourceInput{
 			SceneName:  "NonExistent",
-			SourceName: "Text",
+			SourceName: "BrandNewText",
 			Text:       "Test",
 		}
 		_, _, err := server.handleCreateTextSource(context.Background(), nil, input)

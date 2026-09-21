@@ -7,6 +7,7 @@ import (
 
 	"github.com/andreykaipov/goobs/api/typedefs"
 	"github.com/ironystock/agentic-obs/internal/obs"
+	"github.com/ironystock/agentic-obs/internal/obs/obstest"
 )
 
 // Ensure MockOBSClient implements the OBSClient interface
@@ -20,15 +21,17 @@ type MockOBSClient struct {
 	// Connection state
 	connected bool
 
-	// Mock data
-	scenes         []string
-	groups         map[string][]obs.SceneSource // groups and their contents
-	currentScene   string
-	sources        []*typedefs.Input
-	sceneItems     map[string][]obs.SceneSource
-	sourceSettings map[string]map[string]interface{}
-	inputMutes     map[string]bool
-	inputVolumes   map[string]float64
+	// world holds the OBS state this mock shares with the contract suite and,
+	// through it, with a real OBS. See mock_world.go for why it is not modelled
+	// here any more.
+	world *obstest.Fake
+
+	// currentScene has no counterpart in the fake, which models the scene graph
+	// rather than the frontend's notion of what is on air.
+	currentScene string
+
+	// inputVolumes likewise: the fake models mute, not level.
+	inputVolumes map[string]float64
 
 	// Recording/Streaming state
 	recording bool
@@ -158,34 +161,71 @@ type MockOBSClient struct {
 
 // NewMockOBSClient creates a new mock OBS client with default test data.
 func NewMockOBSClient() *MockOBSClient {
+	// Seeded with the same fixture the mcp tests have always assumed. The names
+	// are load-bearing: roughly forty tests look up "Scene 1", "Gaming",
+	// "Microphone" and friends by name, so the fold keeps them rather than
+	// making every one of those tests a rewrite.
+	world := obstest.NewFake()
+
+	for _, scene := range []string{"Scene 1", "Scene 2", "Gaming", "Starting Soon"} {
+		if err := world.CreateScene(scene); err != nil {
+			panic("seeding the mock world: " + err.Error())
+		}
+	}
+
+	// The order matters. Scene item ids are handed out in sequence, and a good
+	// number of tests address items by the id the old mock happened to give
+	// them -- Webcam is 1 and Text is 2 in "Scene 1". Reproducing the ids costs
+	// nothing here and saves rewriting those tests to learn nothing new.
+	seed := func(scene, name, kind string, settings map[string]interface{}) {
+		if _, err := world.CreateInput(scene, name, kind, settings); err != nil {
+			panic("seeding the mock world: " + err.Error())
+		}
+	}
+	seed("Scene 1", "Webcam", "dshow_input",
+		map[string]interface{}{"video_device_id": "default", "resolution": "1920x1080"}) // 1
+	seed("Scene 1", "Text", "text_gdiplus_v2", nil)     // 2
+	seed("Gaming", "Game Capture", "game_capture", nil) // 3
+
+	// Webcam placed a second time, in another scene. A source shared across
+	// scenes is the case this project keeps getting wrong, so the fixture holds
+	// one: CreateSceneItem references the input rather than copying it.
+	if _, err := world.CreateSceneItem("Gaming", "Webcam", true); err != nil { // 4
+		panic("seeding the mock world: " + err.Error())
+	}
+
+	// The audio inputs go in a scene of their own, after the ids above are
+	// settled. OBS refcounts sources, so an input with no placement anywhere
+	// does not survive -- the old mock kept a separate list of sources that
+	// belonged to no scene, which is a state a real OBS cannot be in.
+	seed("Scene 2", "Microphone", "wasapi_input_capture",
+		map[string]interface{}{"device_id": "default", "use_device_timing": true})
+	seed("Scene 2", "Desktop Audio", "wasapi_output_capture",
+		map[string]interface{}{"device_id": "default"})
+
+	// Filters on the seeded sources. They live in the world too, because a
+	// filter belongs to a source and the contract checks that they agree.
+	seedFilter := func(source, name, kind string, settings map[string]interface{}) {
+		if err := world.CreateSourceFilter(source, name, kind, settings); err != nil {
+			panic("seeding the mock world: " + err.Error())
+		}
+	}
+	seedFilter("Webcam", "Color Correction", "color_filter_v2",
+		map[string]interface{}{"brightness": 0.0, "contrast": 0.0, "saturation": 0.0})
+	seedFilter("Webcam", "Sharpen", "sharpness_filter_v2",
+		map[string]interface{}{"sharpness": 0.08})
+	seedFilter("Microphone", "Noise Suppression", "noise_suppress_filter_v2",
+		map[string]interface{}{"suppress_level": -30, "method": "rnnoise"})
+	seedFilter("Microphone", "Compressor", "compressor_filter",
+		map[string]interface{}{"ratio": 10.0, "threshold": -18.0})
+	if err := world.SetSourceFilterEnabled("Microphone", "Compressor", false); err != nil {
+		panic("seeding the mock world: " + err.Error())
+	}
+
 	return &MockOBSClient{
 		connected:    false,
-		scenes:       []string{"Scene 1", "Scene 2", "Gaming", "Starting Soon"},
+		world:        world,
 		currentScene: "Scene 1",
-		sources: []*typedefs.Input{
-			{InputName: "Microphone", InputKind: "wasapi_input_capture"},
-			{InputName: "Desktop Audio", InputKind: "wasapi_output_capture"},
-			{InputName: "Webcam", InputKind: "dshow_input"},
-		},
-		sceneItems: map[string][]obs.SceneSource{
-			"Scene 1": {
-				{ID: 1, Name: "Webcam", Type: "dshow_input", Enabled: true, Visible: true},
-				{ID: 2, Name: "Text", Type: "text_gdiplus_v2", Enabled: true, Visible: true},
-			},
-			"Gaming": {
-				{ID: 3, Name: "Game Capture", Type: "game_capture", Enabled: true, Visible: true},
-				{ID: 4, Name: "Webcam", Type: "dshow_input", Enabled: true, Visible: true},
-			},
-		},
-		sourceSettings: map[string]map[string]interface{}{
-			"Microphone":    {"device_id": "default", "use_device_timing": true},
-			"Desktop Audio": {"device_id": "default"},
-			"Webcam":        {"video_device_id": "default", "resolution": "1920x1080"},
-		},
-		inputMutes: map[string]bool{
-			"Microphone":    false,
-			"Desktop Audio": false,
-		},
 		inputVolumes: map[string]float64{
 			"Microphone":    0.0,
 			"Desktop Audio": 0.0,
@@ -193,110 +233,14 @@ func NewMockOBSClient() *MockOBSClient {
 		recording: false,
 		paused:    false,
 		streaming: false,
-		// Design tool mock data
-		// Alignment 5 is OBS_ALIGN_TOP|OBS_ALIGN_LEFT, the value libobs gives a new
-		// scene item. Modelling it matters: until FB-54 every transform write sent
-		// alignment=0 and re-anchored items to their centre, and the mock could not
-		// show that because it did not carry the field. (FB-54)
-		sceneItemTransforms: map[string]map[int]*obs.SceneItemTransform{
-			"Scene 1": {
-				1: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: obs.AlignTopLeft, Width: 1920, Height: 1080},
-				2: {PositionX: 100, PositionY: 50, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: obs.AlignTopLeft, Width: 400, Height: 100},
-			},
-			"Gaming": {
-				3: {PositionX: 0, PositionY: 0, ScaleX: 1.0, ScaleY: 1.0, Rotation: 0, Alignment: obs.AlignTopLeft, Width: 1920, Height: 1080},
-				4: {PositionX: 1600, PositionY: 800, ScaleX: 0.25, ScaleY: 0.25, Rotation: 0, Alignment: obs.AlignTopLeft, Width: 320, Height: 180},
-			},
-		},
-		sceneItemLocked: map[string]map[int]bool{
-			"Scene 1": {1: false, 2: false},
-			"Gaming":  {3: false, 4: false},
-		},
-		inputKinds: []string{
-			"text_gdiplus_v3", "image_source", "color_source_v3", "browser_source",
-			"ffmpeg_source", "wasapi_input_capture", "wasapi_output_capture",
-			"dshow_input", "game_capture", "window_capture", "monitor_capture",
-		},
-		inputDefaults: map[string]map[string]interface{}{
-			"color_source_v3": {"color": 4278190080.0, "width": 0.0, "height": 0.0},
-			"text_gdiplus_v3": {"text": "", "font": map[string]interface{}{"face": "Arial", "size": 36.0}, "color": 16777215.0},
-			"browser_source":  {"url": "https://obsproject.com/browser-source", "width": 800.0, "height": 600.0, "shutdown": false, "restart_when_active": false, "css": ""},
-			"image_source":    {"file": "", "unload": false},
-			"ffmpeg_source":   {"local_file": "", "looping": false, "restart_on_activate": true},
-		},
-		nextSceneItemID: 100,
-		// Filter mock data
-		sourceFilters: map[string][]obs.FilterInfo{
-			"Webcam": {
-				{Name: "Color Correction", Kind: "color_filter_v2", Index: 0, Enabled: true},
-				{Name: "Sharpen", Kind: "sharpness_filter_v2", Index: 1, Enabled: true},
-			},
-			"Microphone": {
-				{Name: "Noise Suppression", Kind: "noise_suppress_filter_v2", Index: 0, Enabled: true},
-				{Name: "Compressor", Kind: "compressor_filter", Index: 1, Enabled: false},
-			},
-		},
-		filterDetails: map[string]map[string]*obs.FilterDetails{
-			"Webcam": {
-				"Color Correction": {
-					Name:     "Color Correction",
-					Kind:     "color_filter_v2",
-					Index:    0,
-					Enabled:  true,
-					Settings: map[string]interface{}{"brightness": 0.0, "contrast": 0.0, "saturation": 0.0},
-				},
-				"Sharpen": {
-					Name:     "Sharpen",
-					Kind:     "sharpness_filter_v2",
-					Index:    1,
-					Enabled:  true,
-					Settings: map[string]interface{}{"sharpness": 0.08},
-				},
-			},
-			"Microphone": {
-				"Noise Suppression": {
-					Name:     "Noise Suppression",
-					Kind:     "noise_suppress_filter_v2",
-					Index:    0,
-					Enabled:  true,
-					Settings: map[string]interface{}{"suppress_level": -30, "method": "rnnoise"},
-				},
-				"Compressor": {
-					Name:     "Compressor",
-					Kind:     "compressor_filter",
-					Index:    1,
-					Enabled:  false,
-					Settings: map[string]interface{}{"ratio": 10.0, "threshold": -18.0},
-				},
-			},
-		},
-		filterKinds: []string{
-			"color_filter_v2", "sharpness_filter_v2", "noise_suppress_filter_v2",
-			"compressor_filter", "limiter_filter", "gain_filter", "chroma_key_filter_v2",
-			"luma_key_filter", "mask_filter_v2", "scroll_filter", "crop_filter",
-		},
-		// Transition mock data
-		transitions: []obs.TransitionInfo{
-			{Name: "Cut", Kind: "cut_transition", Fixed: true, Configurable: false},
-			{Name: "Fade", Kind: "fade_transition", Fixed: false, Configurable: true},
-			{Name: "Swipe", Kind: "swipe_transition", Fixed: false, Configurable: true},
-			{Name: "Slide", Kind: "slide_transition", Fixed: false, Configurable: true},
-			{Name: "Stinger", Kind: "obs_stinger_transition", Fixed: false, Configurable: true},
-		},
-		currentTransition: &obs.TransitionDetails{
-			Name:         "Fade",
-			Kind:         "fade_transition",
-			Duration:     300,
-			Configurable: true,
-			Settings:     map[string]interface{}{},
-		},
-		studioModeEnabled: false,
-		// Virtual cam and replay buffer (FB-25)
+
+		// Everything below has no counterpart in the fake: it is the client's
+		// own surface rather than OBS's scene state, so it stays here.
+		studioModeEnabled:  false,
 		virtualCamActive:   false,
 		replayBufferActive: false,
 		lastReplayPath:     "/recordings/replay-2024-01-15_14-30-00.mkv",
 		previewScene:       "Scene 1",
-		// Hotkeys (FB-26)
 		hotkeys: []string{
 			"OBSBasic.StartRecording",
 			"OBSBasic.StopRecording",
@@ -307,7 +251,30 @@ func NewMockOBSClient() *MockOBSClient {
 			"OBSBasic.ReplayBuffer",
 			"OBSBasic.SaveReplay",
 		},
-		// Audio devices — simulates a Voicemeeter + default speaker setup
+		inputKinds: []string{
+			"text_gdiplus_v3", "image_source", "color_source_v3", "browser_source",
+			"ffmpeg_source", "wasapi_input_capture", "wasapi_output_capture",
+			"dshow_input", "game_capture", "window_capture", "monitor_capture",
+		},
+		filterKinds: []string{
+			"color_filter_v2", "sharpness_filter_v2", "noise_suppress_filter_v2",
+			"compressor_filter", "limiter_filter", "gain_filter", "chroma_key_filter_v2",
+			"luma_key_filter", "mask_filter_v2", "scroll_filter", "crop_filter",
+		},
+		currentTransition: &obs.TransitionDetails{
+			Name:         "Fade",
+			Kind:         "fade_transition",
+			Duration:     300,
+			Configurable: true,
+			Settings:     map[string]interface{}{},
+		},
+		transitions: []obs.TransitionInfo{
+			{Name: "Cut", Kind: "cut_transition", Fixed: true, Configurable: false},
+			{Name: "Fade", Kind: "fade_transition", Fixed: false, Configurable: true},
+			{Name: "Swipe", Kind: "swipe_transition", Fixed: false, Configurable: true},
+			{Name: "Slide", Kind: "slide_transition", Fixed: false, Configurable: true},
+			{Name: "Stinger", Kind: "obs_stinger_transition", Fixed: false, Configurable: true},
+		},
 		audioDevices: []obs.AudioDevice{
 			{Name: "Default", Value: "default"},
 			{Name: "VoiceMeeter Output (VB-Audio VoiceMeeter VAIO)", Value: "{0.0.0.00000000}.{voicemeeter-output}"},
@@ -376,82 +343,6 @@ func (m *MockOBSClient) HealthCheck() error {
 	return nil
 }
 
-// GetSceneList returns mock scene list.
-func (m *MockOBSClient) GetSceneList() ([]string, string, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetSceneList != nil {
-		return nil, "", m.ErrorOnGetSceneList
-	}
-
-	if !m.connected {
-		return nil, "", fmt.Errorf("not connected to OBS")
-	}
-
-	return m.scenes, m.currentScene, nil
-}
-
-// GetSceneByName returns mock scene data.
-func (m *MockOBSClient) GetSceneByName(name string) (*obs.Scene, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	// Check if scene exists
-	found := false
-	for _, s := range m.scenes {
-		if s == name {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return nil, fmt.Errorf("scene '%s' not found", name)
-	}
-
-	// A scene item's state is spread across three maps here. sceneItems holds a
-	// copy of the geometry and the lock, but the authoritative values live in
-	// sceneItemTransforms and sceneItemLocked -- and the setters write only
-	// there, so the copy goes stale the moment anything is moved or locked.
-	//
-	// Deriving the answer rather than returning the copy is what stops this
-	// double contradicting itself. It matters more than tidiness: a tool that
-	// writes through one accessor and reads back through another would pass its
-	// test here and fail against OBS, which holds one scene item and answers
-	// every question from it. (FB-64)
-	stored := m.sceneItems[name]
-	sources := make([]obs.SceneSource, 0, len(stored))
-
-	for _, item := range stored {
-		src := item
-
-		if tr := m.sceneItemTransforms[name][item.ID]; tr != nil {
-			src.X, src.Y = tr.PositionX, tr.PositionY
-			src.Width, src.Height = tr.Width, tr.Height
-			src.ScaleX, src.ScaleY = tr.ScaleX, tr.ScaleY
-			src.Rotation = tr.Rotation
-		}
-		if locked, ok := m.sceneItemLocked[name][item.ID]; ok {
-			src.Locked = locked
-		}
-		// Visible and Enabled are one fact under two names, as the real client
-		// has reported them since FB-60.
-		src.Visible = src.Enabled
-
-		sources = append(sources, src)
-	}
-
-	return &obs.Scene{
-		Name:    name,
-		Index:   0,
-		Sources: sources,
-	}, nil
-}
-
 // SetCurrentScene simulates switching scenes.
 func (m *MockOBSClient) SetCurrentScene(name string) error {
 	m.mu.Lock()
@@ -465,74 +356,12 @@ func (m *MockOBSClient) SetCurrentScene(name string) error {
 		return fmt.Errorf("not connected to OBS")
 	}
 
-	// Check if scene exists
-	found := false
-	for _, s := range m.scenes {
-		if s == name {
-			found = true
-			break
-		}
-	}
-	if !found {
+	// Scene existence is the world's to answer, not a second list kept here.
+	if _, err := m.world.GetSceneByName(name); err != nil {
 		return fmt.Errorf("scene '%s' not found", name)
 	}
 
 	m.currentScene = name
-	return nil
-}
-
-// CreateScene simulates creating a scene.
-func (m *MockOBSClient) CreateScene(name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnCreateScene != nil {
-		return m.ErrorOnCreateScene
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	// Check if scene already exists
-	for _, s := range m.scenes {
-		if s == name {
-			return fmt.Errorf("scene '%s' already exists", name)
-		}
-	}
-
-	m.scenes = append(m.scenes, name)
-	m.sceneItems[name] = []obs.SceneSource{}
-	return nil
-}
-
-// RemoveScene simulates removing a scene.
-func (m *MockOBSClient) RemoveScene(name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnRemoveScene != nil {
-		return m.ErrorOnRemoveScene
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	// Find and remove scene
-	idx := -1
-	for i, s := range m.scenes {
-		if s == name {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		return fmt.Errorf("scene '%s' not found", name)
-	}
-
-	m.scenes = append(m.scenes[:idx], m.scenes[idx+1:]...)
-	delete(m.sceneItems, name)
 	return nil
 }
 
@@ -708,103 +537,6 @@ func (m *MockOBSClient) GetStreamingStatus() (*obs.StreamingStatus, error) {
 	}, nil
 }
 
-// ListSources returns mock source list.
-func (m *MockOBSClient) ListSources() ([]*typedefs.Input, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnListSources != nil {
-		return nil, m.ErrorOnListSources
-	}
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	return m.sources, nil
-}
-
-// GetSourceSettings returns mock source settings.
-func (m *MockOBSClient) GetSourceSettings(sourceName string) (map[string]interface{}, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetSourceSettings != nil {
-		return nil, m.ErrorOnGetSourceSettings
-	}
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	settings, exists := m.sourceSettings[sourceName]
-	if !exists {
-		return nil, fmt.Errorf("source '%s' not found", sourceName)
-	}
-
-	return settings, nil
-}
-
-// SetSourceSettings writes a source's settings, merging or replacing.
-//
-// overlay=false resets to the kind's defaults before applying, so a key left out
-// reverts rather than persisting -- the behaviour obstest.Fake and a real OBS
-// both have, and the reason this is not a plain map assignment. (FB-67)
-func (m *MockOBSClient) SetSourceSettings(sourceName string, settings map[string]interface{}, overlay bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnSetSourceSettings != nil {
-		return m.ErrorOnSetSourceSettings
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	current, exists := m.sourceSettings[sourceName]
-	if !exists {
-		return fmt.Errorf("source '%s' not found", sourceName)
-	}
-
-	if !overlay {
-		current = map[string]interface{}{}
-	}
-	for k, v := range settings {
-		current[k] = v
-	}
-	m.sourceSettings[sourceName] = current
-
-	return nil
-}
-
-// GetInputDefaultSettings returns the defaults for an input kind.
-func (m *MockOBSClient) GetInputDefaultSettings(inputKind string) (map[string]interface{}, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetInputDefaultSettings != nil {
-		return nil, m.ErrorOnGetInputDefaultSettings
-	}
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	defaults, exists := m.inputDefaults[inputKind]
-	if !exists {
-		return nil, fmt.Errorf("no such input kind '%s'", inputKind)
-	}
-
-	// A copy: defaults belong to the kind, and a caller editing what it read
-	// must not change what the next caller sees.
-	out := make(map[string]interface{}, len(defaults))
-	for k, v := range defaults {
-		out[k] = v
-	}
-	return out, nil
-}
-
 // PressInputPropertiesButton records a button press so a test can assert one
 // happened. There is nothing to observe otherwise -- the press mutates no
 // settings, which is the point of it.
@@ -820,7 +552,7 @@ func (m *MockOBSClient) PressInputPropertiesButton(sourceName, propertyName stri
 		return fmt.Errorf("not connected to OBS")
 	}
 
-	if _, exists := m.sourceSettings[sourceName]; !exists {
+	if _, err := m.world.GetSourceSettings(sourceName); err != nil {
 		return fmt.Errorf("source '%s' not found", sourceName)
 	}
 
@@ -835,63 +567,6 @@ func (m *MockOBSClient) ButtonPresses() []string {
 	return append([]string(nil), m.buttonPresses...)
 }
 
-// ToggleSourceVisibility simulates toggling source visibility.
-// SetSceneItemEnabled sets a scene item's visibility to an explicit state.
-func (m *MockOBSClient) SetSceneItemEnabled(sceneName string, sceneItemID int, enabled bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnSetSceneItemEnabled != nil {
-		return m.ErrorOnSetSceneItemEnabled
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	items, exists := m.sceneItems[sceneName]
-	if !exists {
-		return fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	for i, item := range items {
-		if item.ID == sceneItemID {
-			m.sceneItems[sceneName][i].Enabled = enabled
-			return nil
-		}
-	}
-
-	return fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-}
-
-// GetSceneItemEnabled reports a scene item's visibility.
-//
-// It reads the same m.sceneItems entry SetSceneItemEnabled writes, so the two
-// cannot disagree. That is not true of every pair on this mock -- transforms and
-// lock states live in separate maps -- which is why obstest.Fake exists and why
-// this mock is scheduled to be replaced by it.
-func (m *MockOBSClient) GetSceneItemEnabled(sceneName string, sceneItemID int) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if !m.connected {
-		return false, fmt.Errorf("not connected to OBS")
-	}
-
-	items, exists := m.sceneItems[sceneName]
-	if !exists {
-		return false, fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	for _, item := range items {
-		if item.ID == sceneItemID {
-			return item.Enabled, nil
-		}
-	}
-
-	return false, fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-}
-
 func (m *MockOBSClient) ToggleSourceVisibility(sceneName string, sourceID int) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -904,83 +579,17 @@ func (m *MockOBSClient) ToggleSourceVisibility(sceneName string, sourceID int) (
 		return false, fmt.Errorf("not connected to OBS")
 	}
 
-	items, exists := m.sceneItems[sceneName]
-	if !exists {
-		return false, fmt.Errorf("scene '%s' not found", sceneName)
+	// Read the current state and flip it, rather than flipping a copy held in a
+	// second map. Keeping visibility in two places is how the old mock managed
+	// to have two methods disagree about the same item.
+	enabled, err := m.world.GetSceneItemEnabled(sceneName, sourceID)
+	if err != nil {
+		return false, err
 	}
-
-	for i, item := range items {
-		if item.ID == sourceID {
-			m.sceneItems[sceneName][i].Enabled = !item.Enabled
-			return m.sceneItems[sceneName][i].Enabled, nil
-		}
+	if err := m.world.SetSceneItemEnabled(sceneName, sourceID, !enabled); err != nil {
+		return false, err
 	}
-
-	return false, fmt.Errorf("source ID %d not found in scene '%s'", sourceID, sceneName)
-}
-
-// GetInputMute returns mock input mute state.
-func (m *MockOBSClient) GetInputMute(inputName string) (bool, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetInputMute != nil {
-		return false, m.ErrorOnGetInputMute
-	}
-
-	if !m.connected {
-		return false, fmt.Errorf("not connected to OBS")
-	}
-
-	muted, exists := m.inputMutes[inputName]
-	if !exists {
-		return false, fmt.Errorf("input '%s' not found", inputName)
-	}
-
-	return muted, nil
-}
-
-// ToggleInputMute simulates toggling input mute.
-func (m *MockOBSClient) ToggleInputMute(inputName string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnToggleInputMute != nil {
-		return m.ErrorOnToggleInputMute
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	_, exists := m.inputMutes[inputName]
-	if !exists {
-		return fmt.Errorf("input '%s' not found", inputName)
-	}
-
-	m.inputMutes[inputName] = !m.inputMutes[inputName]
-	return nil
-}
-
-// SetInputMute sets an input's mute state explicitly. (FB-68)
-func (m *MockOBSClient) SetInputMute(inputName string, muted bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnSetInputMute != nil {
-		return m.ErrorOnSetInputMute
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	if _, exists := m.inputMutes[inputName]; !exists {
-		return fmt.Errorf("input '%s' not found", inputName)
-	}
-
-	m.inputMutes[inputName] = muted
-	return nil
+	return !enabled, nil
 }
 
 // SetInputVolume simulates setting input volume.
@@ -1029,38 +638,6 @@ func (m *MockOBSClient) GetInputVolume(inputName string) (float64, float64, erro
 	return vol, 1.0, nil
 }
 
-// GetOBSStatus returns mock OBS status.
-func (m *MockOBSClient) GetOBSStatus() (*obs.OBSStatus, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetOBSStatus != nil {
-		return nil, m.ErrorOnGetOBSStatus
-	}
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	return &obs.OBSStatus{
-		Version:          "30.0.0",
-		WebSocketVersion: "5.4.0",
-		Platform:         "windows",
-		CurrentScene:     m.currentScene,
-		Recording:        m.recording,
-		Streaming:        m.streaming,
-		FPS:              60.0,
-		FrameTime:        16.67,
-		Frames:           10000,
-		DroppedFrames:    5,
-		Video:            m.videoSettings(),
-		// What OBS 32.2.2 reports on this machine. webp is in the list on
-		// purpose: a hardcoded png/jpg/bmp allow-list refused it, which is the
-		// bug this fixture exists to keep fixed. (FB-73)
-		SupportedImageFormats: []string{"bmp", "jpeg", "jpg", "png", "webp"},
-	}, nil
-}
-
 // videoSettings is the canvas the mock reports. Caller must hold the lock.
 //
 // Deliberately not 1920x1080, and deliberately downscaled. A fixture that
@@ -1080,29 +657,30 @@ func (m *MockOBSClient) videoSettings() *obs.VideoSettings {
 	}
 }
 
-// GetVideoSettings returns the mock canvas.
-func (m *MockOBSClient) GetVideoSettings() (*obs.VideoSettings, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetVideoSettings != nil {
-		return nil, m.ErrorOnGetVideoSettings
-	}
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	return m.videoSettings(), nil
-}
-
 // Helper methods for test setup
 
 // SetScenes sets the available scenes for testing.
+// SetScenes makes the world hold exactly these scenes.
+//
+// It adds what is missing and removes what is extra, rather than assigning over
+// a list, because the scenes now have contents: replacing the slice would have
+// left the items of a removed scene behind with nothing referencing them.
 func (m *MockOBSClient) SetScenes(scenes []string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.scenes = scenes
+	want := map[string]bool{}
+	for _, name := range scenes {
+		want[name] = true
+		_ = m.world.CreateScene(name) // already there is fine
+	}
+
+	existing, _, err := m.world.GetSceneList()
+	if err != nil {
+		return
+	}
+	for _, name := range existing {
+		if !want[name] {
+			_ = m.world.RemoveScene(name)
+		}
+	}
 }
 
 // SetCurrentSceneDirect sets the current scene without validation.
@@ -1128,27 +706,44 @@ func (m *MockOBSClient) SetStreamingState(streaming bool) {
 }
 
 // AddSource adds a source to the mock data.
+// AddSource adds an input to the world.
+//
+// OBS has no input that belongs to no scene -- CreateInput requires one, which
+// is why this picks the first scene rather than inventing a placeless source the
+// real client could never produce.
 func (m *MockOBSClient) AddSource(input *typedefs.Input) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sources = append(m.sources, input)
+	if input == nil {
+		return
+	}
+	scenes, _, err := m.world.GetSceneList()
+	if err != nil || len(scenes) == 0 {
+		return
+	}
+	_, _ = m.world.CreateInput(scenes[0], input.InputName, input.InputKind, nil)
 }
 
 // SetSourceSettingsState seeds a source's settings directly, without going
 // through the OBS operation. Named like its neighbours SetInputMuteState and
 // SetInputVolumeState; it used to be called SetSourceSettings, which collided
 // with the real operation once that was added. (FB-67)
+// SetSourceSettingsState replaces a source's settings, creating it if needed.
 func (m *MockOBSClient) SetSourceSettingsState(sourceName string, settings map[string]interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sourceSettings[sourceName] = settings
+	if err := m.world.SetSourceSettings(sourceName, settings, false); err == nil {
+		return
+	}
+	scenes, _, err := m.world.GetSceneList()
+	if err != nil || len(scenes) == 0 {
+		return
+	}
+	if _, err := m.world.CreateInput(scenes[0], sourceName, "color_source_v3", settings); err != nil {
+		return
+	}
 }
 
 // SetInputMuteState sets the mute state for an input.
+// SetInputMuteState sets an input's mute state in the world.
 func (m *MockOBSClient) SetInputMuteState(inputName string, muted bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.inputMutes[inputName] = muted
+	_ = m.world.SetInputMute(inputName, muted)
 }
 
 // SetInputVolumeState sets the volume for an input.
@@ -1165,67 +760,51 @@ func (m *MockOBSClient) SetEventCallback(callback obs.EventCallback) {
 
 // CaptureSceneState returns the current source states for a scene.
 func (m *MockOBSClient) CaptureSceneState(sceneName string) ([]obs.SourceState, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	if m.ErrorOnCaptureSceneState != nil {
 		return nil, m.ErrorOnCaptureSceneState
 	}
-
 	if !m.connected {
 		return nil, fmt.Errorf("not connected to OBS")
 	}
 
-	items, exists := m.sceneItems[sceneName]
-	if !exists {
+	scene, err := m.world.GetSceneByName(sceneName)
+	if err != nil {
 		return nil, fmt.Errorf("scene '%s' not found", sceneName)
 	}
 
-	states := make([]obs.SourceState, len(items))
-	for i, item := range items {
-		states[i] = obs.SourceState{
-			ID:      item.ID,
-			Name:    item.Name,
-			Enabled: item.Enabled,
-		}
+	states := make([]obs.SourceState, len(scene.Sources))
+	for i, item := range scene.Sources {
+		states[i] = obs.SourceState{ID: item.ID, Name: item.Name, Enabled: item.Enabled}
 	}
-
 	return states, nil
 }
 
 // ApplyScenePreset applies source visibility states to a scene.
 func (m *MockOBSClient) ApplyScenePreset(sceneName string, sources []obs.SourceState) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.ErrorOnApplyScenePreset != nil {
 		return m.ErrorOnApplyScenePreset
 	}
-
 	if !m.connected {
 		return fmt.Errorf("not connected to OBS")
 	}
 
-	items, exists := m.sceneItems[sceneName]
-	if !exists {
+	scene, err := m.world.GetSceneByName(sceneName)
+	if err != nil {
 		return fmt.Errorf("scene '%s' not found", sceneName)
 	}
 
-	// Apply each source state
-	for _, src := range sources {
-		found := false
-		for i, item := range items {
-			if item.ID == src.ID {
-				m.sceneItems[sceneName][i].Enabled = src.Enabled
-				found = true
-				break
-			}
+	known := map[int]bool{}
+	for _, item := range scene.Sources {
+		known[item.ID] = true
+	}
+	for _, want := range sources {
+		if !known[want.ID] {
+			return fmt.Errorf("source ID %d not found in scene '%s'", want.ID, sceneName)
 		}
-		if !found {
-			return fmt.Errorf("source ID %d not found in scene '%s'", src.ID, sceneName)
+		if err := m.world.SetSceneItemEnabled(sceneName, want.ID, want.Enabled); err != nil {
+			return err
 		}
 	}
-
 	return nil
 }
 
@@ -1254,65 +833,23 @@ func (m *MockOBSClient) TakeSourceScreenshot(opts obs.ScreenshotOptions) (string
 
 // CreateBrowserSource simulates creating a browser source in a scene.
 func (m *MockOBSClient) CreateBrowserSource(sceneName, sourceName string, settings obs.BrowserSourceSettings) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.ErrorOnCreateBrowserSource != nil {
 		return 0, m.ErrorOnCreateBrowserSource
 	}
-
 	if !m.connected {
 		return 0, fmt.Errorf("not connected to OBS")
 	}
 
-	// Check if scene exists
-	found := false
-	for _, s := range m.scenes {
-		if s == sceneName {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return 0, fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	// Generate a mock scene item ID
-	newID := 100 // Start from 100 to avoid conflicts with existing mock IDs
-	if items, exists := m.sceneItems[sceneName]; exists {
-		for _, item := range items {
-			if item.ID >= newID {
-				newID = item.ID + 1
-			}
-		}
-	}
-
-	// Add the browser source to the scene
-	newSource := obs.SceneSource{
-		ID:      newID,
-		Name:    sourceName,
-		Type:    "browser_source",
-		Enabled: true,
-		Visible: true,
-	}
-
-	if m.sceneItems == nil {
-		m.sceneItems = make(map[string][]obs.SceneSource)
-	}
-	m.sceneItems[sceneName] = append(m.sceneItems[sceneName], newSource)
-
-	// Also add to sourceSettings for consistency
-	if m.sourceSettings == nil {
-		m.sourceSettings = make(map[string]map[string]interface{})
-	}
-	m.sourceSettings[sourceName] = map[string]interface{}{
+	// A browser source is an input of kind browser_source, created the same way
+	// as any other. The old version invented its own scene item ids starting at
+	// 100 to avoid colliding with the ones it had hard-coded elsewhere -- a
+	// symptom of ids living in a map rather than being handed out by one place.
+	return m.world.CreateInput(sceneName, sourceName, "browser_source", map[string]interface{}{
 		"url":    settings.URL,
 		"width":  settings.Width,
 		"height": settings.Height,
 		"css":    settings.CSS,
-	}
-
-	return newID, nil
+	})
 }
 
 // SetMockScreenshotData sets the screenshot data to return from TakeSourceScreenshot.
@@ -1323,362 +860,6 @@ func (m *MockOBSClient) SetMockScreenshotData(data string) {
 }
 
 // Design tool mock implementations
-
-// CreateInput simulates creating an input source in a scene.
-func (m *MockOBSClient) CreateInput(sceneName, sourceName, inputKind string, settings map[string]interface{}) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnCreateInput != nil {
-		return 0, m.ErrorOnCreateInput
-	}
-
-	if !m.connected {
-		return 0, fmt.Errorf("not connected to OBS")
-	}
-
-	// Check if scene exists
-	found := false
-	for _, s := range m.scenes {
-		if s == sceneName {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return 0, fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	// Generate new scene item ID
-	m.nextSceneItemID++
-	newID := m.nextSceneItemID
-
-	// Add the source to the scene
-	newSource := obs.SceneSource{
-		ID:      newID,
-		Name:    sourceName,
-		Type:    inputKind,
-		Enabled: true,
-		Visible: true,
-	}
-
-	if m.sceneItems == nil {
-		m.sceneItems = make(map[string][]obs.SceneSource)
-	}
-	m.sceneItems[sceneName] = append(m.sceneItems[sceneName], newSource)
-
-	// Initialize transform for the new item
-	if m.sceneItemTransforms == nil {
-		m.sceneItemTransforms = make(map[string]map[int]*obs.SceneItemTransform)
-	}
-	if m.sceneItemTransforms[sceneName] == nil {
-		m.sceneItemTransforms[sceneName] = make(map[int]*obs.SceneItemTransform)
-	}
-	m.sceneItemTransforms[sceneName][newID] = &obs.SceneItemTransform{
-		PositionX: 0, PositionY: 0,
-		ScaleX: 1.0, ScaleY: 1.0,
-		Rotation:  0,
-		Alignment: obs.AlignTopLeft,
-		Width:     1920, Height: 1080,
-	}
-
-	// Initialize locked state
-	if m.sceneItemLocked == nil {
-		m.sceneItemLocked = make(map[string]map[int]bool)
-	}
-	if m.sceneItemLocked[sceneName] == nil {
-		m.sceneItemLocked[sceneName] = make(map[int]bool)
-	}
-	m.sceneItemLocked[sceneName][newID] = false
-
-	// Store source settings. An empty map rather than the nil that may have been
-	// passed: a created input has settings, even if none were supplied, and a
-	// nil here reads back as a missing source.
-	if m.sourceSettings == nil {
-		m.sourceSettings = make(map[string]map[string]interface{})
-	}
-	if settings == nil {
-		settings = map[string]interface{}{}
-	}
-	m.sourceSettings[sourceName] = settings
-
-	// Register the input itself, so ListSources can see it. Forgetting this is
-	// what let a created input stay invisible to anything asking whether it
-	// already existed -- ensure_input reported "created" on every call. (FB-71)
-	m.sources = append(m.sources, &typedefs.Input{
-		InputName:            sourceName,
-		InputKind:            inputKind,
-		UnversionedInputKind: inputKind,
-	})
-
-	return newID, nil
-}
-
-// GetSceneItemTransform returns the transform for a scene item.
-func (m *MockOBSClient) GetSceneItemTransform(sceneName string, sceneItemID int) (*obs.SceneItemTransform, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetSceneItemTransform != nil {
-		return nil, m.ErrorOnGetSceneItemTransform
-	}
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	sceneTransforms, exists := m.sceneItemTransforms[sceneName]
-	if !exists {
-		return nil, fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	transform, exists := sceneTransforms[sceneItemID]
-	if !exists {
-		return nil, fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-	}
-
-	// Return a copy to prevent modification
-	result := *transform
-	return &result, nil
-}
-
-// SetSceneItemTransform sets the transform for a scene item.
-func (m *MockOBSClient) SetSceneItemTransform(sceneName string, sceneItemID int, transform *obs.SceneItemTransform) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnSetSceneItemTransform != nil {
-		return m.ErrorOnSetSceneItemTransform
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	sceneTransforms, exists := m.sceneItemTransforms[sceneName]
-	if !exists {
-		return fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	if _, exists := sceneTransforms[sceneItemID]; !exists {
-		return fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-	}
-
-	// Store a copy
-	newTransform := *transform
-	m.sceneItemTransforms[sceneName][sceneItemID] = &newTransform
-	return nil
-}
-
-// SetSceneItemIndex sets the z-order index of a scene item.
-func (m *MockOBSClient) SetSceneItemIndex(sceneName string, sceneItemID int, index int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnSetSceneItemIndex != nil {
-		return m.ErrorOnSetSceneItemIndex
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	items, exists := m.sceneItems[sceneName]
-	if !exists {
-		return fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	// Find the item
-	found := false
-	for _, item := range items {
-		if item.ID == sceneItemID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-	}
-
-	// In a real implementation, we'd reorder the items
-	// For mock, just validate and succeed
-	if index < 0 || index >= len(items) {
-		return fmt.Errorf("invalid index %d for scene with %d items", index, len(items))
-	}
-
-	return nil
-}
-
-// SetSceneItemLocked sets the locked state of a scene item.
-func (m *MockOBSClient) SetSceneItemLocked(sceneName string, sceneItemID int, locked bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnSetSceneItemLocked != nil {
-		return m.ErrorOnSetSceneItemLocked
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	sceneLocked, exists := m.sceneItemLocked[sceneName]
-	if !exists {
-		return fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	if _, exists := sceneLocked[sceneItemID]; !exists {
-		return fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-	}
-
-	m.sceneItemLocked[sceneName][sceneItemID] = locked
-	return nil
-}
-
-// GetSceneItemLocked returns the locked state of a scene item.
-func (m *MockOBSClient) GetSceneItemLocked(sceneName string, sceneItemID int) (bool, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetSceneItemLocked != nil {
-		return false, m.ErrorOnGetSceneItemLocked
-	}
-
-	if !m.connected {
-		return false, fmt.Errorf("not connected to OBS")
-	}
-
-	sceneLocked, exists := m.sceneItemLocked[sceneName]
-	if !exists {
-		return false, fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	locked, exists := sceneLocked[sceneItemID]
-	if !exists {
-		return false, fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-	}
-
-	return locked, nil
-}
-
-// DuplicateSceneItem duplicates a scene item to the same or another scene.
-func (m *MockOBSClient) DuplicateSceneItem(sceneName string, sceneItemID int, destScene string) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnDuplicateSceneItem != nil {
-		return 0, m.ErrorOnDuplicateSceneItem
-	}
-
-	if !m.connected {
-		return 0, fmt.Errorf("not connected to OBS")
-	}
-
-	// Find source item
-	items, exists := m.sceneItems[sceneName]
-	if !exists {
-		return 0, fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	var sourceItem *obs.SceneSource
-	for _, item := range items {
-		if item.ID == sceneItemID {
-			sourceItem = &item
-			break
-		}
-	}
-	if sourceItem == nil {
-		return 0, fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-	}
-
-	// Check destination scene exists
-	found := false
-	for _, s := range m.scenes {
-		if s == destScene {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return 0, fmt.Errorf("destination scene '%s' not found", destScene)
-	}
-
-	// Generate new ID
-	m.nextSceneItemID++
-	newID := m.nextSceneItemID
-
-	// Create duplicate
-	newSource := obs.SceneSource{
-		ID:      newID,
-		Name:    sourceItem.Name,
-		Type:    sourceItem.Type,
-		Enabled: sourceItem.Enabled,
-		Visible: sourceItem.Visible,
-	}
-	m.sceneItems[destScene] = append(m.sceneItems[destScene], newSource)
-
-	// Copy transform
-	if m.sceneItemTransforms[destScene] == nil {
-		m.sceneItemTransforms[destScene] = make(map[int]*obs.SceneItemTransform)
-	}
-	if srcTransform, ok := m.sceneItemTransforms[sceneName][sceneItemID]; ok {
-		transformCopy := *srcTransform
-		m.sceneItemTransforms[destScene][newID] = &transformCopy
-	}
-
-	// Copy locked state
-	if m.sceneItemLocked[destScene] == nil {
-		m.sceneItemLocked[destScene] = make(map[int]bool)
-	}
-	if srcLocked, ok := m.sceneItemLocked[sceneName][sceneItemID]; ok {
-		m.sceneItemLocked[destScene][newID] = srcLocked
-	}
-
-	return newID, nil
-}
-
-// RemoveSceneItem removes a scene item from a scene.
-func (m *MockOBSClient) RemoveSceneItem(sceneName string, sceneItemID int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnRemoveSceneItem != nil {
-		return m.ErrorOnRemoveSceneItem
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	items, exists := m.sceneItems[sceneName]
-	if !exists {
-		return fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	// Find and remove the item
-	idx := -1
-	for i, item := range items {
-		if item.ID == sceneItemID {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		return fmt.Errorf("scene item %d not found in scene '%s'", sceneItemID, sceneName)
-	}
-
-	m.sceneItems[sceneName] = append(items[:idx], items[idx+1:]...)
-
-	// Clean up transform and locked state
-	if sceneTransforms, ok := m.sceneItemTransforms[sceneName]; ok {
-		delete(sceneTransforms, sceneItemID)
-	}
-	if sceneLocked, ok := m.sceneItemLocked[sceneName]; ok {
-		delete(sceneLocked, sceneItemID)
-	}
-
-	return nil
-}
 
 // GetInputKindList returns the list of available input kinds.
 func (m *MockOBSClient) GetInputKindList() ([]string, error) {
@@ -1702,231 +883,6 @@ func (m *MockOBSClient) GetInputKindList() ([]string, error) {
 // =============================================================================
 // Filter mock implementations (FB-23)
 // =============================================================================
-
-// GetSourceFilterList returns filters for a source.
-func (m *MockOBSClient) GetSourceFilterList(sourceName string) ([]obs.FilterInfo, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetSourceFilterList != nil {
-		return nil, m.ErrorOnGetSourceFilterList
-	}
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	filters, exists := m.sourceFilters[sourceName]
-	if !exists {
-		// Return empty list for sources without filters
-		return []obs.FilterInfo{}, nil
-	}
-
-	// Return a copy
-	result := make([]obs.FilterInfo, len(filters))
-	copy(result, filters)
-	return result, nil
-}
-
-// GetSourceFilter returns details for a specific filter.
-func (m *MockOBSClient) GetSourceFilter(sourceName, filterName string) (*obs.FilterDetails, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if m.ErrorOnGetSourceFilter != nil {
-		return nil, m.ErrorOnGetSourceFilter
-	}
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	sourceFilters, exists := m.filterDetails[sourceName]
-	if !exists {
-		return nil, fmt.Errorf("source '%s' not found", sourceName)
-	}
-
-	filter, exists := sourceFilters[filterName]
-	if !exists {
-		return nil, fmt.Errorf("filter '%s' not found on source '%s'", filterName, sourceName)
-	}
-
-	// Return a copy
-	result := *filter
-	return &result, nil
-}
-
-// CreateSourceFilter creates a filter on a source.
-func (m *MockOBSClient) CreateSourceFilter(sourceName, filterName, filterKind string, settings map[string]interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnCreateSourceFilter != nil {
-		return m.ErrorOnCreateSourceFilter
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	// Check if filter already exists
-	if sourceFilters, exists := m.filterDetails[sourceName]; exists {
-		if _, exists := sourceFilters[filterName]; exists {
-			return fmt.Errorf("filter '%s' already exists on source '%s'", filterName, sourceName)
-		}
-	}
-
-	// Initialize maps if needed
-	if m.sourceFilters == nil {
-		m.sourceFilters = make(map[string][]obs.FilterInfo)
-	}
-	if m.filterDetails == nil {
-		m.filterDetails = make(map[string]map[string]*obs.FilterDetails)
-	}
-	if m.filterDetails[sourceName] == nil {
-		m.filterDetails[sourceName] = make(map[string]*obs.FilterDetails)
-	}
-
-	// Determine index
-	index := len(m.sourceFilters[sourceName])
-
-	// Add to filter list
-	m.sourceFilters[sourceName] = append(m.sourceFilters[sourceName], obs.FilterInfo{
-		Name:    filterName,
-		Kind:    filterKind,
-		Index:   index,
-		Enabled: true,
-	})
-
-	// Add to filter details
-	m.filterDetails[sourceName][filterName] = &obs.FilterDetails{
-		Name:     filterName,
-		Kind:     filterKind,
-		Index:    index,
-		Enabled:  true,
-		Settings: settings,
-	}
-
-	return nil
-}
-
-// RemoveSourceFilter removes a filter from a source.
-func (m *MockOBSClient) RemoveSourceFilter(sourceName, filterName string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnRemoveSourceFilter != nil {
-		return m.ErrorOnRemoveSourceFilter
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	// Check if filter exists
-	sourceFilters, exists := m.filterDetails[sourceName]
-	if !exists {
-		return fmt.Errorf("source '%s' not found", sourceName)
-	}
-
-	if _, exists := sourceFilters[filterName]; !exists {
-		return fmt.Errorf("filter '%s' not found on source '%s'", filterName, sourceName)
-	}
-
-	// Remove from filter details
-	delete(m.filterDetails[sourceName], filterName)
-
-	// Remove from filter list
-	filters := m.sourceFilters[sourceName]
-	for i, f := range filters {
-		if f.Name == filterName {
-			m.sourceFilters[sourceName] = append(filters[:i], filters[i+1:]...)
-			break
-		}
-	}
-
-	// Update indices
-	for i := range m.sourceFilters[sourceName] {
-		m.sourceFilters[sourceName][i].Index = i
-		if details, ok := m.filterDetails[sourceName][m.sourceFilters[sourceName][i].Name]; ok {
-			details.Index = i
-		}
-	}
-
-	return nil
-}
-
-// SetSourceFilterEnabled enables or disables a filter.
-func (m *MockOBSClient) SetSourceFilterEnabled(sourceName, filterName string, enabled bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnSetSourceFilterEnabled != nil {
-		return m.ErrorOnSetSourceFilterEnabled
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	sourceFilters, exists := m.filterDetails[sourceName]
-	if !exists {
-		return fmt.Errorf("source '%s' not found", sourceName)
-	}
-
-	filter, exists := sourceFilters[filterName]
-	if !exists {
-		return fmt.Errorf("filter '%s' not found on source '%s'", filterName, sourceName)
-	}
-
-	filter.Enabled = enabled
-
-	// Update in filter list too
-	for i, f := range m.sourceFilters[sourceName] {
-		if f.Name == filterName {
-			m.sourceFilters[sourceName][i].Enabled = enabled
-			break
-		}
-	}
-
-	return nil
-}
-
-// SetSourceFilterSettings updates filter settings.
-func (m *MockOBSClient) SetSourceFilterSettings(sourceName, filterName string, settings map[string]interface{}, overlay bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnSetSourceFilterSettings != nil {
-		return m.ErrorOnSetSourceFilterSettings
-	}
-
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	sourceFilters, exists := m.filterDetails[sourceName]
-	if !exists {
-		return fmt.Errorf("source '%s' not found", sourceName)
-	}
-
-	filter, exists := sourceFilters[filterName]
-	if !exists {
-		return fmt.Errorf("filter '%s' not found on source '%s'", filterName, sourceName)
-	}
-
-	if overlay {
-		// Merge settings
-		for k, v := range settings {
-			filter.Settings[k] = v
-		}
-	} else {
-		// Replace settings
-		filter.Settings = settings
-	}
-
-	return nil
-}
 
 // GetSourceFilterKindList returns available filter types.
 func (m *MockOBSClient) GetSourceFilterKindList() ([]string, error) {
@@ -2403,15 +1359,7 @@ func (m *MockOBSClient) SetCurrentPreviewScene(sceneName string) error {
 		return fmt.Errorf("studio mode is not enabled")
 	}
 
-	// Check if scene exists
-	found := false
-	for _, s := range m.scenes {
-		if s == sceneName {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if _, err := m.world.GetSceneByName(sceneName); err != nil {
 		return fmt.Errorf("scene '%s' not found", sceneName)
 	}
 
@@ -2651,61 +1599,6 @@ func (m *MockOBSClient) ASSSetVariables(variables []obs.ASSVariable) error {
 	}
 	s.ASSVariablesSet = append(s.ASSVariablesSet, variables...)
 	return nil
-}
-
-// CreateSceneItem places an existing input into a scene, sharing it rather than
-// copying it. (FB-71)
-func (m *MockOBSClient) CreateSceneItem(sceneName, sourceName string, enabled bool) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.ErrorOnCreateSceneItem != nil {
-		return 0, m.ErrorOnCreateSceneItem
-	}
-
-	if !m.connected {
-		return 0, fmt.Errorf("not connected to OBS")
-	}
-
-	sceneExists := false
-	for _, s := range m.scenes {
-		if s == sceneName {
-			sceneExists = true
-			break
-		}
-	}
-	if !sceneExists {
-		return 0, fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	if _, ok := m.sourceSettings[sourceName]; !ok {
-		return 0, fmt.Errorf("source '%s' not found", sourceName)
-	}
-
-	kind := ""
-	for _, in := range m.sources {
-		if in.InputName == sourceName {
-			kind = in.InputKind
-			break
-		}
-	}
-
-	m.nextSceneItemID++
-	id := m.nextSceneItemID
-
-	m.sceneItems[sceneName] = append(m.sceneItems[sceneName], obs.SceneSource{
-		ID: id, Name: sourceName, Type: kind, Enabled: enabled, Visible: enabled,
-	})
-	if m.sceneItemTransforms[sceneName] == nil {
-		m.sceneItemTransforms[sceneName] = map[int]*obs.SceneItemTransform{}
-	}
-	m.sceneItemTransforms[sceneName][id] = &obs.SceneItemTransform{ScaleX: 1, ScaleY: 1, Alignment: obs.AlignTopLeft}
-	if m.sceneItemLocked[sceneName] == nil {
-		m.sceneItemLocked[sceneName] = map[int]bool{}
-	}
-	m.sceneItemLocked[sceneName][id] = false
-
-	return id, nil
 }
 
 // VendorCall records one CallVendorRequest, so a test can assert what was sent

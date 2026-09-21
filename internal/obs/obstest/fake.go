@@ -60,6 +60,16 @@ func newSceneItem(id int, source string, enabled bool) *sceneItem {
 		enabled: enabled,
 		transform: obs.SceneItemTransform{
 			BoundsType: obs.BoundsNone,
+
+			// Scale 1 and OBS_ALIGN_TOP|OBS_ALIGN_LEFT are what libobs gives a
+			// new scene item. Starting from zeros made the fake describe an item
+			// scaled to nothing and anchored at its centre, which is a state OBS
+			// never produces -- and alignment in particular is the field FB-54
+			// was about, where every transform write silently sent 0 and
+			// re-anchored items.
+			ScaleX:    1.0,
+			ScaleY:    1.0,
+			Alignment: obs.AlignTopLeft,
 		},
 	}
 }
@@ -678,6 +688,9 @@ func (f *Fake) DuplicateSceneItem(sceneName string, sceneItemID int, destScene s
 var kindDefaults = map[string]map[string]interface{}{
 	"color_source_v3": {"color": 4278190080.0, "width": 0.0, "height": 0.0},
 	"ffmpeg_source":   {"local_file": "", "looping": false, "restart_on_activate": true},
+	"text_gdiplus_v3": {"text": "", "font": map[string]interface{}{"face": "Arial", "size": 36.0}, "color": 16777215.0},
+	"browser_source":  {"url": "https://obsproject.com/browser-source", "width": 800.0, "height": 600.0, "shutdown": false, "restart_when_active": false, "css": ""},
+	"image_source":    {"file": "", "unload": false},
 }
 
 func (f *Fake) GetSourceSettings(sourceName string) (map[string]interface{}, error) {
@@ -824,6 +837,13 @@ func (f *Fake) GetOBSStatus() (*obs.OBSStatus, error) {
 		WebSocketVersion: "5.7.4",
 		Platform:         "windows",
 		Video:            &v,
+
+		// take_screenshot validates the requested format against this list
+		// rather than a hard-coded one, because a real build reports seventeen
+		// formats and the guess that started as png/jpg/bmp refused a webp OBS
+		// had just accepted (FB-73). A fake that reported none would make that
+		// validation untestable.
+		SupportedImageFormats: []string{"bmp", "jpeg", "jpg", "png", "webp"},
 	}, nil
 }
 
@@ -853,6 +873,23 @@ func (f *Fake) CreateSceneItem(sceneName, sourceName string, enabled bool) (int,
 	sc.items = append(sc.items, it)
 
 	return it.id, nil
+}
+
+// GetSceneItemLocked reports whether a placement is locked.
+//
+// The setter existed without it, which was survivable only while nothing asked.
+// MockOBSClient kept the answer in a map of its own, so once the write went to
+// the world the two halves of one fact lived in two places -- the exact shape
+// of bug one world exists to make impossible.
+func (f *Fake) GetSceneItemLocked(sceneName string, sceneItemID int) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	it, err := f.findItem(sceneName, sceneItemID)
+	if err != nil {
+		return false, err
+	}
+	return it.locked, nil
 }
 
 // SetSceneItemLocked locks or unlocks a placement.

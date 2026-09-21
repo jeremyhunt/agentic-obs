@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **The two test doubles are now one world (FB-88)** — `MockOBSClient`'s OBS
+  state moved onto `obstest.Fake`, the double the behavioural contract and a live
+  OBS already agree on. This had been flagged as urgent for several increments;
+  what settled it was measuring it. Running the contract against `MockOBSClient`
+  for the first time: **all thirty rows failed.** Not a handful of edge cases —
+  every behaviour the contract checks, on the double that ~40 mcp tests rely on.
+
+  The cost had been paid repeatedly and each time looked like a separate bug.
+  `SceneSource.Visible` (FB-60) was populated by *both* doubles while the real
+  client never set it, so every test agreed with a client that was wrong. FB-64
+  found three ways this mock contradicted itself. FB-71 found `CreateInput`
+  making an input `ListSources` could not see. And the divergence was still
+  growing: groups, source uuids, input kinds and blend modes were all added to
+  both doubles separately in the last few increments.
+
+  `MockOBSClient` keeps what is genuinely its own — connection state, the
+  `ErrorOnX` injection points, recording and streaming flags, hotkeys,
+  transitions, audio devices. Everything the contract covers delegates.
+  `mock_obs.go` went from 2,777 lines to 1,670, and **all 30 contract rows now
+  pass against it**, the same rows the fake and OBS 32.2.2 pass.
+
+  Folding them immediately found a split fact: `SetSceneItemLocked` wrote to the
+  world while `GetSceneItemLocked` still read a map of the mock's own, so the two
+  halves of one piece of state lived in two places. That is the exact bug class
+  one world makes impossible, and the repo's own `mock_consistency_test.go`
+  caught it within minutes.
+
+### Fixed
+- **The fake described scene items OBS never produces (FB-88)** — a new item had
+  scale 0 and alignment 0, meaning scaled to nothing and anchored at its centre.
+  libobs gives a new scene item scale 1 and `OBS_ALIGN_TOP|OBS_ALIGN_LEFT`.
+  Alignment matters especially: it is the field FB-54 was about, where every
+  transform write silently sent 0 and re-anchored items. The fake also reported
+  no supported image formats, which made `take_screenshot`'s format validation
+  untestable against it.
+- **The fake knew two input kinds' defaults; the mock knew five (FB-88)** — the
+  richer table won. A settings diff merges defaults into both sides before
+  comparing, so a kind whose defaults are unknown makes every stored default read
+  as drift.
+- **One test depended on a state OBS cannot be in (FB-88)** — it created a text
+  source named `Text` in a non-existent scene and expected "scene not found". It
+  passed only because the old mock held a scene item whose source was absent from
+  its own input list. With one world, `Text` is a real input, so the name
+  collision is reported first. The test now uses a name nothing else uses.
+
 ### Added
 - **Per-rule debounce (FB-87)** — `debounce_ms` in a rule's `trigger_config`
   makes it wait for the events to stop and then run once, on the last one.
