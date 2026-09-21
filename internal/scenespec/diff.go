@@ -52,6 +52,11 @@ type Finding struct {
 type DiffReader interface {
 	Reader
 	GetInputDefaultSettings(inputKind string) (map[string]interface{}, error)
+
+	// The canvas, for resolving a placement stated as intent. A capture never
+	// needs it -- it reports the numbers that are there -- so it sits here
+	// rather than on Reader.
+	GetVideoSettings() (*obs.VideoSettings, error)
 }
 
 // Tolerances for comparing floats.
@@ -95,6 +100,13 @@ func Diff(client DiffReader, spec *Spec, sceneName string) ([]Finding, error) {
 	}
 
 	live, err := CaptureWith(client, sceneName, FullCapture())
+	if err != nil {
+		return nil, err
+	}
+
+	// Layouts become concrete transforms first, so everything below compares
+	// numbers to numbers and there is no second notion of where something goes.
+	spec, err = resolveLayouts(client, spec, live)
 	if err != nil {
 		return nil, err
 	}

@@ -22,6 +22,10 @@ import (
 type Fake struct {
 	mu    sync.Mutex
 	world world
+
+	// canvas is per fake rather than package-level. It was a shared var, which
+	// meant a test that resized it resized it for every other fake in the run.
+	canvas obs.VideoSettings
 }
 
 type world struct {
@@ -105,10 +109,13 @@ type filter struct {
 
 // NewFake returns a Fake with an empty world.
 func NewFake() *Fake {
-	return &Fake{world: world{
-		scenes: map[string]*scene{},
-		inputs: map[string]*input{},
-	}}
+	return &Fake{
+		world: world{
+			scenes: map[string]*scene{},
+			inputs: map[string]*input{},
+		},
+		canvas: defaultCanvas(),
+	}
 }
 
 // findItem locates a scene item, or explains which part was missing. OBS answers
@@ -813,30 +820,45 @@ func (f *Fake) ToggleInputMute(inputName string) error {
 	return nil
 }
 
-// canvas is the fake's video configuration.
+// defaultCanvas is what a new fake reports.
 //
 // Not 1920x1080, and downscaled, on purpose: a fixture that matches the common
 // assumption lets code pass while reading hardcoded numbers instead of reported
 // ones. The fractional frame rate catches anything that reads the numerator and
 // calls it a rate. (FB-69)
-var canvas = obs.VideoSettings{
-	BaseWidth:      2560,
-	BaseHeight:     1440,
-	OutputWidth:    1920,
-	OutputHeight:   1080,
-	FPSNumerator:   60000,
-	FPSDenominator: 1001,
+func defaultCanvas() obs.VideoSettings {
+	return obs.VideoSettings{
+		BaseWidth:      2560,
+		BaseHeight:     1440,
+		OutputWidth:    1920,
+		OutputHeight:   1080,
+		FPSNumerator:   60000,
+		FPSDenominator: 1001,
+	}
 }
 
 func (f *Fake) GetVideoSettings() (*obs.VideoSettings, error) {
-	v := canvas
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	v := f.canvas
 	return &v, nil
+}
+
+// SetCanvas changes the base resolution, which an operator can do in OBS at any
+// time. Output resolution follows, since nothing here tests downscaling.
+func (f *Fake) SetCanvas(width, height float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.canvas.BaseWidth = width
+	f.canvas.BaseHeight = height
 }
 
 // GetOBSStatus reports enough of a status to carry the canvas, which is the
 // only part of it the contract covers.
 func (f *Fake) GetOBSStatus() (*obs.OBSStatus, error) {
-	v := canvas
+	v := f.canvas
 	return &obs.OBSStatus{
 		Version:          "32.2.2",
 		WebSocketVersion: "5.7.4",

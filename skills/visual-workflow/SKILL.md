@@ -120,12 +120,23 @@ Two traps worth stating outright:
 
 Two patterns, and the first is usually better:
 
-**(a) The layer stack — no coordinates at all.** The established convention here
-(`TGV-SongifyWidget/starting-soon/layers.py`) is to emit **every layer as a
+**(a) The layer stack — no coordinates at all.** The established convention
+here (`TGV-SongifyWidget/starting-soon/layers.py`) is to emit **every layer as a
 full-canvas RGBA PNG**, so every source sits at position 0,0 with scale 1.0 and
 **z-order is the only thing that matters**. Conditioning absorbs the geometry,
 placement becomes trivial, and nothing needs re-measuring when the canvas
 changes. Prefer this whenever you control the asset.
+
+In a scene spec, one line per placement says exactly that:
+
+```json
+{ "source": "OVERLAY_StartingSoonCRT", "layout": { "mode": "stretch" } }
+```
+
+A `layout` is resolved against the live canvas every time the spec is applied or
+diffed, so the document survives a resolution change that a captured transform
+cannot — a transform is a correct answer about one canvas with no way to say
+so.
 
 **(b) A positioned item** — a PiP camera, a window-capture avatar, a corner
 badge. Use `set_source_transform` with a `fit` block and state the intent

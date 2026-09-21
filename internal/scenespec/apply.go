@@ -134,6 +134,18 @@ func Apply(ctx context.Context, client ApplyClient, spec *Spec, sceneName string
 		return nil, fmt.Errorf("capturing %q before applying: %w", sceneName, err)
 	}
 
+	// Layouts become concrete transforms before anything is written, so every
+	// step below works on numbers and the internal diff cannot reach a
+	// different conclusion about where a placement goes. An unresolvable layout
+	// stops the whole apply here rather than failing one op: a malformed
+	// document half-applied leaves a scene nobody described.
+	//
+	// Report.Before stays the live capture, unresolved -- it is the undo.
+	spec, err = resolveLayouts(client, spec, before)
+	if err != nil {
+		return nil, err
+	}
+
 	report := &Report{Scene: sceneName, DryRun: opts.DryRun, Before: before, Ops: []OpResult{}}
 	run := &applyRun{ctx: ctx, client: client, scene: sceneName, opts: opts, report: report}
 

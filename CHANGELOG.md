@@ -7,6 +7,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **A scene spec can say what a placement means, not just where it sits
+  (FB-91)** — a `layout` block on a placement, resolved against the live canvas
+  on every apply and every diff. This was 4a’s own acceptance criterion and
+  shipped unbuilt; ADR-011 recorded it as deferred until now.
+
+  An absolute transform is a correct answer about **one** canvas and has no way
+  to say so, which is how a spec quietly becomes wrong the day the base
+  resolution changes — while still looking complete. The scenes this was built
+  for are 2560×1440 stacks of full-canvas layers, and
+
+  ```json
+  { "source": "OVERLAY_StartingSoonCRT", "layout": { "mode": "stretch" } }
+  ```
+
+  is one of them, at whatever resolution OBS is running now. A test applies a
+  layout, changes the canvas to 1920×1080, and watches the diff report drift and
+  the apply put it right; the control shows a captured transform reporting
+  nothing and leaving the layer at the old size.
+
+  It reuses `layout.Spec` — the type `set_source_transform{fit}` already
+  resolves — rather than a parallel `{mode, region, anchor}`, which would be a
+  second place for the two to disagree. Resolution is a **pre-pass** at the top
+  of both `Diff` and `Apply`, so neither grows a branch and they cannot reach
+  different conclusions. It overwrites the seven fields it owns and leaves
+  scale, rotation and crop to the transform, or to the **live** item when the
+  placement has none, so a placement that says only "fill the canvas" keeps the
+  crop it already had.
+
+  Two refusals rather than wrong answers: an unknown mode stops the whole apply
+  before anything is written, because a malformed document half-applied leaves a
+  scene nobody described; and a layout *inside a group* is rejected, because it
+  would resolve against the canvas while a group’s children are positioned
+  within the group.
+
+### Fixed
+- **The fake’s canvas was a package-level var (FB-91)** — shared by every
+  `Fake` in a run, so one test resizing it resized it for all of them. It is
+  per-instance now, with a `SetCanvas` seam, which is what made the
+  canvas-change test possible at all.
+
 - **The visual-workflow skill (FB-90)** — the seventh skill, and the one that
   spans more than this server. Making a visual asset and getting it on screen is
   one loop, but it crosses four toolchains, and the boundary between them is the

@@ -15,7 +15,10 @@
 // document; it performs no I/O of its own and holds no OBS state.
 package scenespec
 
-import "github.com/ironystock/agentic-obs/internal/obs"
+import (
+	"github.com/ironystock/agentic-obs/internal/layout"
+	"github.com/ironystock/agentic-obs/internal/obs"
+)
 
 // SpecVersion is the schema version written into every captured document.
 //
@@ -168,4 +171,24 @@ type ItemSpec struct {
 	// that OBS reports as zero and then refuses on write. obs.NormaliseBounds
 	// is what makes writing one back possible.
 	Transform *obs.SceneItemTransform `json:"transform,omitempty"`
+
+	// Layout states a placement as intent instead of coordinates, and is
+	// resolved against the live canvas every time this spec is applied or
+	// compared.
+	//
+	// A transform is an answer about one canvas and has no way to say so, which
+	// is how a spec quietly becomes wrong when the base resolution changes. The
+	// scenes this was built for are stacks of full-canvas layers, and
+	//
+	//	"layout": {"mode": "stretch"}
+	//
+	// expresses one without a single pixel coordinate.
+	//
+	// It overwrites the seven fields it owns -- position, alignment, bounds
+	// type, bounds alignment and bounds size -- and leaves scale, rotation and
+	// crop to Transform, or to the live item when Transform is absent.
+	//
+	// A capture never emits one: only the author knows a placement means "the
+	// whole canvas" rather than "these particular numbers".
+	Layout *layout.Spec `json:"layout,omitempty"`
 }
