@@ -223,3 +223,31 @@ func TestAddScriptHandlesNullDocument(t *testing.T) {
 		t.Fatalf("got %v, want [C:/agentic-obs/bridge.lua]", scripts)
 	}
 }
+
+func TestAddScriptHandlesNullScriptsTool(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "null-scripts-tool.json")
+	// Create a collection where scripts-tool is explicitly null
+	if err := os.WriteFile(path, []byte(`{
+		"name": "NullScriptsTool",
+		"modules": {
+			"scripts-tool": null
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// null should be treated as absent/empty, not an error
+	changed, err := AddScript(path, "C:/agentic-obs/bridge.lua")
+	if err != nil {
+		t.Fatalf("AddScript on null scripts-tool: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed should be true")
+	}
+
+	// Verify the script was added
+	scripts := readScripts(t, path)
+	if len(scripts) != 1 || scripts[0] != "C:/agentic-obs/bridge.lua" {
+		t.Fatalf("got %v, want [C:/agentic-obs/bridge.lua]", scripts)
+	}
+}

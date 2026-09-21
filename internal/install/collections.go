@@ -58,6 +58,14 @@ func writeCollection(path string, doc map[string]interface{}) error {
 		return fmt.Errorf("could not encode %s: %w", path, err)
 	}
 
+	// Get the original file's mode to preserve permissions across rename.
+	// os.CreateTemp always creates at 0600, and rename carries source permissions
+	// to destination, so we must restore the original before rename.
+	var originalMode os.FileMode = 0o644
+	if stat, err := os.Stat(path); err == nil {
+		originalMode = stat.Mode()
+	}
+
 	// Write to a temp file in the same directory, then atomic rename.
 	// This ensures the collection is either fully old or fully new, never half.
 	dir := filepath.Dir(path)
@@ -82,6 +90,11 @@ func writeCollection(path string, doc map[string]interface{}) error {
 		return fmt.Errorf("could not close temp file: %w", err)
 	}
 
+	// Restore the original file's permissions before rename.
+	if err := os.Chmod(tmpPath, originalMode); err != nil {
+		return fmt.Errorf("could not chmod temp file: %w", err)
+	}
+
 	// Atomic rename. Within a volume, rename is atomic: the collection is
 	// either fully old bytes or fully new bytes, never corrupted partial state.
 	if err := os.Rename(tmpPath, path); err != nil {
@@ -91,7 +104,8 @@ func writeCollection(path string, doc map[string]interface{}) error {
 }
 
 // scriptList returns the existing entries. If scripts-tool is present but not
-// an array, it returns an error rather than silently discarding the value.
+// an array (and not null), it returns an error rather than silently discarding
+// the value. Null is treated as absent (empty list).
 func scriptList(doc map[string]interface{}) ([]interface{}, error) {
 	modules, _ := doc["modules"].(map[string]interface{})
 	if modules == nil {
@@ -99,11 +113,12 @@ func scriptList(doc map[string]interface{}) ([]interface{}, error) {
 	}
 
 	scriptsTool, exists := modules[scriptsKey]
-	if !exists {
+	// Treat missing key or null value as empty list
+	if !exists || scriptsTool == nil {
 		return nil, nil
 	}
 
-	// If it exists, it must be an array. Don't silently discard.
+	// If it exists and is non-nil, it must be an array. Don't silently discard.
 	list, ok := scriptsTool.([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("modules.%s must be an array, got %T", scriptsKey, scriptsTool)
