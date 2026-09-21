@@ -29,9 +29,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   frontend-tools plugin, so the bridge ships code rather than reloading files.
   See [ADR-013](design/decisions/013-the-lua-bridge.md).
 
-  Install with `agentic-obs install-bridge --all` while OBS is closed. Scene
-  collections keep their own script lists, so a new collection needs another
-  run. `get_obs_status` reports whether the bridge is loaded.
+  Install with `agentic-obs install-bridge --all` while OBS is closed (or
+  `uninstall-bridge --all` to remove). Scene collections keep their own script
+  lists, so a new collection needs another run. `get_obs_status` reports whether
+  the bridge is loaded.
+
+  The script lives at `bridge/agentic-obs-bridge.lua` and is embedded directly
+  by the `bridgescript` package, so there is no copied asset and no `make` step.
+  A plain `go test ./...` works from a clean checkout.
 
 - **`run_lua_in_obs`, absent from default builds** — the scripting channel needs
   both `-tags scripting` at build time and `AGENTIC_OBS_SCRIPTING=1` at startup.
