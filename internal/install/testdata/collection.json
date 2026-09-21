@@ -1,0 +1,12 @@
+{
+  "name": "Fixture",
+  "current_scene": "Game",
+  "sources": [
+    { "name": "cam", "id": 9007199254740993, "settings": { "width": 1920 } }
+  ],
+  "modules": {
+    "scripts-tool": [
+      { "path": "C:/existing/other.lua", "settings": {} }
+    ]
+  }
+}
