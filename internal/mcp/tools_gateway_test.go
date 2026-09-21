@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/ironystock/agentic-obs/internal/obs"
@@ -158,8 +159,17 @@ func TestGetOBSStatusReportsTheCanvas(t *testing.T) {
 	_, result, err := server.handleGetOBSStatus(context.Background(), nil, struct{}{})
 	require.NoError(t, err)
 
-	status, ok := result.(*obs.OBSStatus)
-	require.True(t, ok)
+	// handleGetOBSStatus wraps the status in an anonymous struct that embeds
+	// *obs.OBSStatus alongside the bridge status, so a direct type assertion
+	// to *obs.OBSStatus no longer matches. Round-tripping through JSON checks
+	// the shape that actually matters -- that embedding keeps every existing
+	// field inline -- instead of pinning the wrapper's exact Go type, which is
+	// this handler's own implementation detail.
+	raw, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var status obs.OBSStatus
+	require.NoError(t, json.Unmarshal(raw, &status))
 	require.NotNil(t, status.Video, "status must carry the canvas; a layout tool has nothing to work from otherwise")
 
 	assert.Equal(t, 2560.0, status.Video.BaseWidth)

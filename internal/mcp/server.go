@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ironystock/agentic-obs/internal/automation"
+	"github.com/ironystock/agentic-obs/internal/bridge"
 	agenthttp "github.com/ironystock/agentic-obs/internal/http"
 	"github.com/ironystock/agentic-obs/internal/obs"
 	"github.com/ironystock/agentic-obs/internal/screenshot"
@@ -118,6 +119,7 @@ func (c *thumbnailCache) clear() {
 type Server struct {
 	mcpServer        *mcpsdk.Server
 	obsClient        OBSClient
+	bridge           *bridge.Transport
 	storage          *storage.DB
 	screenshotMgr    *screenshot.Manager
 	httpServer       *agenthttp.Server
@@ -208,9 +210,17 @@ func NewServer(config ServerConfig) (*Server, error) {
 		Password: config.OBSPassword,
 	})
 
-	// Set up event callback to dispatch MCP notifications
+	// The bridge needs the event stream for its replies, and so does the MCP
+	// notification path. The bridge's own traffic is filtered out of the
+	// latter: a reply is plumbing, not an OBS state change, and feeding it to
+	// the automation engine would be ADR-010's echo problem by another road.
 	eventHandler := obs.NewEventHandler(s.handleOBSEventNotification)
-	obsClient.SetEventSink(eventHandler)
+	s.bridge = bridge.New(obsClient)
+
+	obsClient.SetEventSink(obs.MultiSink{
+		s.bridge,
+		obs.FilterSink{Sink: eventHandler, Keep: notBridgeTraffic},
+	})
 
 	s.obsClient = obsClient
 
@@ -537,6 +547,16 @@ func (s *Server) handleOBSEventNotification(eventType obs.EventType, data map[st
 			}
 		}
 	}
+}
+
+// notBridgeTraffic rejects settings events for the bridge's two transport
+// sources.
+func notBridgeTraffic(e obs.Event) bool {
+	if e.Type != obs.EventTypeInputSettingsChanged {
+		return true
+	}
+	name, _ := e.Payload["input_name"].(string)
+	return name != bridge.InboxSource && name != bridge.MailboxSource
 }
 
 // GetOBSClient returns the OBS client instance (for internal use)

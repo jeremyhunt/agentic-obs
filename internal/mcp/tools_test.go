@@ -5,10 +5,12 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ironystock/agentic-obs/internal/bridge"
 	"github.com/ironystock/agentic-obs/internal/mcp/testutil"
 	"github.com/ironystock/agentic-obs/internal/obs"
 	"github.com/ironystock/agentic-obs/internal/storage"
@@ -21,9 +23,17 @@ func testServer(t *testing.T) (*Server, *testutil.MockOBSClient) {
 	mock := testutil.NewMockOBSClient()
 	mock.Connect() // Start connected
 
+	// The mock satisfies bridge.Caller (it has SetSourceSettings), but nothing
+	// in it ever answers the bridge's round trip, so a probe always runs out
+	// the clock. A short timeout keeps get_obs_status tests fast instead of
+	// paying the production 2s default for a reply that will never come.
+	br := bridge.New(mock)
+	br.Timeout = 10 * time.Millisecond
+
 	// Create a minimal server for testing tool handlers
 	server := &Server{
 		obsClient: mock,
+		bridge:    br,
 		ctx:       context.Background(),
 	}
 

@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/ironystock/agentic-obs/internal/bridge"
 	"github.com/ironystock/agentic-obs/internal/obs"
 	"github.com/ironystock/agentic-obs/internal/scenespec"
 	"github.com/ironystock/agentic-obs/internal/storage"
@@ -1432,8 +1433,15 @@ func (s *Server) handleGetOBSStatus(ctx context.Context, request *mcpsdk.CallToo
 		return nil, nil, fmt.Errorf("failed to get OBS status: %w", err)
 	}
 
-	s.recordAction("get_obs_status", "Get OBS status", nil, status, true, time.Since(start))
-	return nil, status, nil
+	// The bridge is reported rather than assumed: scripts live per scene
+	// collection, so switching collections unloads it with no warning.
+	result := struct {
+		*obs.OBSStatus
+		Bridge bridge.Status `json:"bridge"`
+	}{OBSStatus: status, Bridge: s.bridge.Probe(ctx)}
+
+	s.recordAction("get_obs_status", "Get OBS status", nil, result, true, time.Since(start))
+	return nil, result, nil
 }
 
 // New P1 tool handlers
