@@ -4,7 +4,48 @@ All notable changes to agentic-obs are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+### Fixed
+- **A rule that reacts to what it does no longer feeds itself (FB-85)** — the
+  engine reacts to OBS events and writes to OBS, and OBS announces every write as
+  an event, so a rule triggering on `source_visibility_changed` with a
+  `set_visibility` action looped. That is the obvious way to express "this must
+  stay visible", and it has always looped. Measured before the fix: **one
+  external event produced 2,300 writes in 300 ms.**
+
+  `cooldown_ms` was never the answer. It defaults to 0, so the loop was the
+  out-of-the-box behaviour rather than something a user opted into, and when set
+  it throttles genuine events exactly as hard as echoes — it counts rather than
+  identifies. Cooldown stays what it is, a rate limit, and is now documented as
+  such.
+
+  The engine records each state-setting write before making it and drops the
+  first matching event. Four details carry the design, each the difference
+  between working and looking like it works:
+
+  - **The value is part of the key.** Without it, hiding something the engine had
+    just shown would read as its own echo — so it would stop answering the
+    operator precisely when they were correcting it.
+  - **Entries are counted, not flagged.** Two writes produce two events, and
+    collapsing them lets the second re-trigger.
+  - **Entries are consumed on match**, or the suppressor becomes a filter that
+    swallows every event of that shape for its lifetime.
+  - **Entries expire after 500 ms.** A write can fail and OBS can coalesce two
+    changes into one announcement, so an expected echo may never arrive; one that
+    waited forever would eat a real event minutes later, silently.
+
+  The check sits ahead of the rule loop, because the event is not ours "for this
+  rule" — it is ours, and a second rule watching the same event would otherwise
+  act on what the first one caused. The suppressor shares the engine's clock
+  seam, so a fake clock moves both; two notions of `now` in one engine is exactly
+  what that seam exists to prevent.
+
+  Now: one external event, one write — and two separate operator changes still
+  produce two writes. `toggle_visibility` is only partly covered, deliberately:
+  the value a toggle lands on is not known until it has landed, and converting it
+  into a read-then-set would change what the action means. **ADR-010** records
+  the decision, including the rejected alternative of detaching the event
+  callback during a write, which would blind the thumbnail cache and the resource
+  notifications that share the same fan-out.
 
 ### Added
 - **Scene specs, apply (FB-84)** — `apply_scene_spec` reconciles a scene to a

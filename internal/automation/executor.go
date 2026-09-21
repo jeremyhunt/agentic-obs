@@ -40,6 +40,20 @@ type OBSClient interface {
 // Executor handles action execution against OBS.
 type Executor struct {
 	obsClient OBSClient
+
+	// suppressor records each state-setting write so the engine can recognise
+	// the event OBS sends back as its own. Optional: a nil suppressor records
+	// nothing and suppresses nothing, which is what the executor's own tests
+	// want and what any other embedder gets by default.
+	suppressor *writeSuppressor
+}
+
+// useSuppressor attaches the engine's suppressor. Separate from NewExecutor so
+// the ten test call sites that construct an executor directly keep working, and
+// because an executor without one is a legitimate configuration rather than a
+// half-built object.
+func (e *Executor) useSuppressor(s *writeSuppressor) {
+	e.suppressor = s
 }
 
 // NewExecutor creates a new action executor.
@@ -154,6 +168,7 @@ func (e *Executor) setScene(params map[string]interface{}) error {
 	if !ok {
 		return fmt.Errorf("set_scene requires 'scene_name' parameter")
 	}
+	e.suppressor.Expect(sceneKey(sceneName))
 	return e.obsClient.SetCurrentScene(sceneName)
 }
 
@@ -186,9 +201,12 @@ func (e *Executor) setMute(params map[string]interface{}) error {
 
 	// Only toggle if state needs to change
 	if currentMuted != muted {
+		e.suppressor.Expect(muteKey(inputName, muted))
 		return e.obsClient.ToggleInputMute(inputName)
 	}
 
+	// Already in the wanted state, so there is no write and no echo to expect.
+	// Recording one here would leave an entry to swallow somebody else's change.
 	return nil
 }
 
@@ -229,7 +247,20 @@ func (e *Executor) toggleVisibility(params map[string]interface{}) error {
 		return fmt.Errorf("toggle_visibility requires 'source_id' parameter")
 	}
 
-	_, err := e.obsClient.ToggleSourceVisibility(sceneName, sourceID)
+	// A toggle cannot be recorded in advance, because the value it lands on is
+	// not known until it has landed. Recording afterwards from the returned
+	// state leaves a window in which the event overtakes the entry.
+	//
+	// That window is narrow -- the event crosses a channel before it is
+	// dispatched -- and it is not closed here on purpose: converting a toggle
+	// into a read-then-set to make it predictable would change what the action
+	// means. A rule that toggles in response to its own toggle is oscillating
+	// by construction, which is the circuit breaker's problem rather than the
+	// suppressor's. set_visibility is the action for a rule that wants a state.
+	nowVisible, err := e.obsClient.ToggleSourceVisibility(sceneName, sourceID)
+	if err == nil {
+		e.suppressor.Expect(visibilityKey(sceneName, sourceID, nowVisible))
+	}
 	return err
 }
 
@@ -256,6 +287,10 @@ func (e *Executor) setVisibility(params map[string]interface{}) error {
 		return fmt.Errorf("set_visibility requires 'visible'")
 	}
 
+	// Recorded before the write, not after: OBS announces the change as soon as
+	// it lands, and an entry added afterwards races the event it exists to
+	// match. Recording a write that then fails is harmless -- the entry expires.
+	e.suppressor.Expect(visibilityKey(sceneName, sourceID, visible))
 	return e.obsClient.SetSceneItemEnabled(sceneName, sourceID, visible)
 }
 
