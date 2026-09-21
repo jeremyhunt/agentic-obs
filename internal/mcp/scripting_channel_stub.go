@@ -14,3 +14,10 @@ func registerScriptingChannel(s *Server) {}
 // scriptingToolNames is empty here: the default build serves no scripting
 // tools.
 func scriptingToolNames() []string { return nil }
+
+// scriptingEnabled is always false here, with no env var check at all -- so
+// the string "AGENTIC_OBS_SCRIPTING" does not appear in this binary either.
+// getGroupEnabled's "Scripting" case (tool_config.go) needs this symbol in
+// every build, even though the untagged build never adds a "Scripting" entry
+// to toolGroupMetadata for that case to be reached against.
+func scriptingEnabled() bool { return false }

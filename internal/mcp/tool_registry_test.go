@@ -144,19 +144,33 @@ func assertSameToolSets(t *testing.T, declared, served []string) {
 }
 
 // TestHelpToolCountMatchesRegisteredTools ties the documented total to reality.
+//
+// HelpToolCount deliberately describes only the default shipped surface (see
+// help_content.go), so scriptingToolNames() is added on to account for a tool
+// that exists only when this build was made with -tags scripting AND
+// AGENTIC_OBS_SCRIPTING=1 was set before the process started -- both zero in
+// every other configuration, where this is the original comparison.
 func TestHelpToolCountMatchesRegisteredTools(t *testing.T) {
 	s := newRegisteredServer(t, DefaultToolGroupConfig())
 
 	served := servedToolNames(t, s)
 
-	assert.Equal(t, len(served), HelpToolCount,
-		"HelpToolCount must equal the number of tools actually registered; "+
+	assert.Equal(t, len(served), HelpToolCount+len(scriptingToolNames()),
+		"HelpToolCount must equal the number of tools actually registered, "+
+			"plus any build-only extras named by scriptingToolNames(); "+
 			"update internal/mcp/help_content.go")
 }
 
 // TestToolGroupGatingIsReal disables one group at a time and asserts that
 // exactly that group's tools disappear. ADR-004 promised group gating; until now
 // nothing verified it end to end. (FB-52)
+//
+// Scripting (present only under -tags scripting with AGENTIC_OBS_SCRIPTING=1)
+// is deliberately the one exception: it has no field on toolGroups at all
+// (see setGroupEnabled in tool_config.go), because its tool is registered
+// once at startup from the env var alone. "Disabling" it here is a documented
+// no-op, so its tool must still be served -- the opposite expectation from
+// every other group, asserted explicitly rather than silently skipped.
 func TestToolGroupGatingIsReal(t *testing.T) {
 	for _, group := range ToolGroupOrder {
 		t.Run(group+" disabled", func(t *testing.T) {
@@ -168,9 +182,17 @@ func TestToolGroupGatingIsReal(t *testing.T) {
 
 			assertSameToolSets(t, declaredToolNames(s), served)
 
-			for _, tool := range toolGroupMetadata[group].ToolNames {
-				assert.NotContains(t, served, tool,
-					"%s is disabled, so %s must not be served", group, tool)
+			if group == "Scripting" {
+				for _, tool := range toolGroupMetadata[group].ToolNames {
+					assert.Contains(t, served, tool,
+						"%s is env-gated, not config-gated: %s must still be served even when "+
+							"setGroupEnabled was asked to disable it", group, tool)
+				}
+			} else {
+				for _, tool := range toolGroupMetadata[group].ToolNames {
+					assert.NotContains(t, served, tool,
+						"%s is disabled, so %s must not be served", group, tool)
+				}
 			}
 
 			// Meta tools can never be disabled.

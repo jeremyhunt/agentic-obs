@@ -55,7 +55,12 @@ func TestHandleGetToolConfig(t *testing.T) {
 
 		groups, ok := resultMap["groups"].([]ToolGroupInfo)
 		require.True(t, ok, "groups should be []ToolGroupInfo")
-		assert.Len(t, groups, 10, "should have 10 tool groups")
+		// Derived rather than hardcoded: toolGroupMetadata gains a "Scripting"
+		// entry only under -tags scripting with AGENTIC_OBS_SCRIPTING=1 set
+		// before the process started, so a literal 10 here would fail under
+		// that real deployment configuration while every actual tool count
+		// stayed correct.
+		assert.Len(t, groups, len(toolGroupMetadata), "should list every group in toolGroupMetadata")
 
 		// Verify all groups are enabled by default
 		for _, g := range groups {
@@ -255,10 +260,15 @@ func TestHandleListToolGroups(t *testing.T) {
 		resultMap := result.(map[string]interface{})
 		groups := resultMap["groups"].([]ToolGroupInfo)
 
-		assert.Len(t, groups, 10, "should list all 10 groups")
-		assert.Equal(t, 10, resultMap["count"])
+		// Derived rather than hardcoded: toolGroupMetadata gains a "Scripting"
+		// entry only under -tags scripting with AGENTIC_OBS_SCRIPTING=1 set
+		// before the process started.
+		assert.Len(t, groups, len(toolGroupMetadata), "should list every group in toolGroupMetadata")
+		assert.Equal(t, len(toolGroupMetadata), resultMap["count"])
 
-		// Verify correct order
+		// Verify correct order for the groups present in every build. This
+		// only checks a prefix, so it stays valid whether or not a trailing
+		// "Scripting" entry is also present.
 		expectedOrder := []string{"Core", "Sources", "Audio", "Layout", "Visual", "Design", "Filters", "Transitions", "Automation", "AdvancedSceneSwitcher"}
 		for i, expectedName := range expectedOrder {
 			assert.Equal(t, expectedName, groups[i].Name, "group %d should be %s", i, expectedName)
@@ -279,7 +289,7 @@ func TestHandleListToolGroups(t *testing.T) {
 		resultMap := result.(map[string]interface{})
 		groups := resultMap["groups"].([]ToolGroupInfo)
 
-		assert.Len(t, groups, 10, "should include disabled groups")
+		assert.Len(t, groups, len(toolGroupMetadata), "should include disabled groups")
 
 		// Verify Audio and Visual show as disabled
 		var audioFound, visualFound bool
@@ -311,7 +321,7 @@ func TestHandleListToolGroups(t *testing.T) {
 		resultMap := result.(map[string]interface{})
 		groups := resultMap["groups"].([]ToolGroupInfo)
 
-		assert.Len(t, groups, 8, "should exclude 2 disabled groups")
+		assert.Len(t, groups, len(toolGroupMetadata)-2, "should exclude 2 disabled groups")
 
 		// Verify Audio and Visual are not in the list
 		for _, g := range groups {
@@ -495,9 +505,14 @@ func TestTotalToolCountMatchesMetadata(t *testing.T) {
 
 	totalTools := groupToolCount + len(MetaToolNames)
 
-	assert.Equal(t, HelpToolCount, totalTools,
-		"HelpToolCount (%d) must equal %d group tools + %d meta-tools = %d",
-		HelpToolCount, groupToolCount, len(MetaToolNames), totalTools)
+	// HelpToolCount deliberately excludes scriptingToolNames(): toolGroupMetadata
+	// only carries a "Scripting" entry (and so only counts its tool in
+	// groupToolCount above) when this build was made with -tags scripting AND
+	// AGENTIC_OBS_SCRIPTING=1 was set before the process started -- both zero
+	// otherwise, where this is the original comparison.
+	assert.Equal(t, HelpToolCount+len(scriptingToolNames()), totalTools,
+		"HelpToolCount (%d) + scripting-only tools (%d) must equal %d group tools + %d meta-tools = %d",
+		HelpToolCount, len(scriptingToolNames()), groupToolCount, len(MetaToolNames), totalTools)
 }
 
 // TestToolNamesAreUnique ensures no duplicate tool names exist across groups.

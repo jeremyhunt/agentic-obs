@@ -325,6 +325,16 @@ func (s *Server) getGroupEnabled(group string) bool {
 		return s.toolGroups.Automation
 	case "AdvancedSceneSwitcher":
 		return s.toolGroups.AdvancedSceneSwitcher
+	case "Scripting":
+		// Not a field on toolGroups: run_lua_in_obs is registered once at
+		// startup from AGENTIC_OBS_SCRIPTING alone (scripting_channel.go), not
+		// from runtime config. Reporting scriptingEnabled() here -- instead of
+		// falling through to the default false -- keeps list_tool_groups and
+		// get_tool_config honest about what is actually being served. In the
+		// untagged build this resolves to the stub's scriptingEnabled(),
+		// which is always false; the group itself is never present there for
+		// this case to even be reached.
+		return scriptingEnabled()
 	default:
 		return false
 	}
@@ -354,6 +364,12 @@ func (s *Server) setGroupEnabled(group string, enabled bool) {
 		s.toolGroups.Automation = enabled
 	case "AdvancedSceneSwitcher":
 		s.toolGroups.AdvancedSceneSwitcher = enabled
+	case "Scripting":
+		// Deliberately inert. Scripting has no field on toolGroups: its tool
+		// is registered once at startup from AGENTIC_OBS_SCRIPTING alone, so a
+		// later set_tool_config call has nothing real to flip and must not
+		// pretend otherwise. getGroupEnabled("Scripting") always reports the
+		// env var's actual state regardless of what was "set" here.
 	}
 }
 

@@ -55,6 +55,22 @@ func init() {
 	toolHelpContent["run_lua_in_obs"] = runLuaHelp
 }
 
+// scriptingToolNames lets the count tests (TestHelpToolCountMatchesRegisteredTools,
+// TestTotalToolCountMatchesMetadata) account for a tool that exists only in
+// this build -- and, like everything else in this file, only when the
+// operator actually turned it on. It must share init()'s exact condition:
+// HelpToolCount deliberately excludes this tool, so the moment this list and
+// toolGroupMetadata's "Scripting" entry disagreed about when they're present,
+// those tests would go back to failing under a real deployment
+// (AGENTIC_OBS_SCRIPTING=1 set before the process starts, not toggled
+// mid-test with t.Setenv).
+func scriptingToolNames() []string {
+	if !scriptingEnabled() {
+		return nil
+	}
+	return []string{"run_lua_in_obs"}
+}
+
 const runLuaHelp = `run_lua_in_obs — run Lua inside the OBS process
 
 Compiles and runs a chunk through the agentic-obs bridge. Returns whatever the
