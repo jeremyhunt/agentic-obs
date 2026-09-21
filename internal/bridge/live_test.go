@@ -10,6 +10,7 @@ package bridge_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -90,7 +91,11 @@ func TestLiveBridgeReceivesArgsAsDataNotCode(t *testing.T) {
 func TestLiveBridgeSandboxWithholdsTheMachine(t *testing.T) {
 	transport := liveTransport(t)
 
-	for _, name := range []string{"os", "io", "package", "require", "dofile", "loadfile", "loadstring", "load", "debug", "setfenv", "getfenv", "getmetatable", "setmetatable", "rawset", "rawget"} {
+	// _G would hand back the real global table and undo the whole sandbox;
+	// coroutine.wrap is a way to run code the count hook cannot interrupt;
+	// rawequal/newproxy reach the metatable machinery the raw* family is kept
+	// out for; collectgarbage can stall the render thread on its own.
+	for _, name := range []string{"os", "io", "package", "require", "dofile", "loadfile", "loadstring", "load", "debug", "setfenv", "getfenv", "getmetatable", "setmetatable", "rawset", "rawget", "_G", "coroutine", "rawequal", "collectgarbage", "newproxy"} {
 		t.Run(name, func(t *testing.T) {
 			got, err := transport.Run(context.Background(), "return "+name+" == nil", nil)
 			if err != nil {
@@ -149,5 +154,187 @@ func TestLiveBridgeReportsCompileErrors(t *testing.T) {
 	}
 	if got.Err == "" {
 		t.Error("a compile failure came back with no message")
+	}
+}
+
+// set_value is the most intricate code in the bridge and the least reachable
+// from Go: no CGO (ADR-001) means no unit test can execute a line of it. The
+// tests from here down are the only verification it will ever get, so they go
+// after the encoder's edges rather than its happy path.
+
+// A table is the shape any non-trivial chunk returns, and every level of it
+// goes through a different branch of set_value: obs_data_set_obj for the
+// table, and the scalar setters for what it holds.
+func TestLiveBridgeRoundTripsANestedTable(t *testing.T) {
+	transport := liveTransport(t)
+
+	got, err := transport.Run(context.Background(), `
+		return {
+			name = "outer",
+			count = 3,
+			inner = { flag = true, leaf = { text = "bottom" } },
+		}
+	`, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !got.OK {
+		t.Fatalf("the chunk failed: %s", got.Err)
+	}
+
+	top, ok := got.Value.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result = %#v, want an object", got.Value)
+	}
+	if top["name"] != "outer" {
+		t.Errorf("name = %#v, want \"outer\"", top["name"])
+	}
+	// Numbers cross as doubles: obs_data_set_double on the way out, JSON on
+	// the way back.
+	if top["count"] != 3.0 {
+		t.Errorf("count = %#v, want 3", top["count"])
+	}
+
+	inner, ok := top["inner"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("inner = %#v, want an object", top["inner"])
+	}
+	if inner["flag"] != true {
+		t.Errorf("inner.flag = %#v, want true", inner["flag"])
+	}
+
+	leaf, ok := inner["leaf"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("inner.leaf = %#v, want an object", inner["leaf"])
+	}
+	if leaf["text"] != "bottom" {
+		t.Errorf("inner.leaf.text = %#v, want \"bottom\"", leaf["text"])
+	}
+}
+
+// MAX_DEPTH is 8 and the top-level value sits at depth 0, so eight nested
+// tables are the last that fit and the ninth is refused. A cap that silently
+// truncated instead would hand back a result that reads like success.
+func TestLiveBridgeEnforcesMaxDepth(t *testing.T) {
+	transport := liveTransport(t)
+
+	// nest(n) builds n tables, one inside the next.
+	nest := func(n int) string {
+		return fmt.Sprintf(`
+			local top = {}
+			local cur = top
+			for _ = 1, %d do cur.next = {}; cur = cur.next end
+			return top
+		`, n-1)
+	}
+
+	t.Run("eight levels fit", func(t *testing.T) {
+		got, err := transport.Run(context.Background(), nest(8), nil)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if !got.OK {
+			t.Fatalf("eight levels was refused: %s", got.Err)
+		}
+	})
+
+	t.Run("nine levels are refused", func(t *testing.T) {
+		got, err := transport.Run(context.Background(), nest(9), nil)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if got.OK {
+			t.Fatalf("nine levels reported success: %#v", got.Value)
+		}
+		if !strings.Contains(got.Err, "nested") {
+			t.Errorf("error = %q, want it to name the depth cap", got.Err)
+		}
+	})
+}
+
+// MAX_BYTES is 64 KB, counted across values AND keys. The key case is the
+// point: counting only values let a chunk return one table with an enormous
+// key and sail past the cap while still reading as success.
+func TestLiveBridgeEnforcesMaxBytes(t *testing.T) {
+	transport := liveTransport(t)
+
+	cases := []struct {
+		name string
+		lua  string
+	}{
+		{"a huge value", `return string.rep("x", 70000)`},
+		{"a huge key", `return { [string.rep("k", 70000)] = 1 }`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := transport.Run(context.Background(), tc.lua, nil)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if got.OK {
+				t.Fatal("a result over the byte cap reported success")
+			}
+			if !strings.Contains(got.Err, "bytes") {
+				t.Errorf("error = %q, want it to name the byte cap", got.Err)
+			}
+		})
+	}
+}
+
+// A value obs_data has no setter for is refused rather than stringified.
+// Returning "function: 0x...", which is what tostring would give, would be a
+// result that looks like data and is not.
+//
+// A function stands in for the whole class. Userdata would test the same
+// branch of set_value, and every userdata reachable from the sandbox is an OBS
+// object that would have to be released -- leaking one per test run is the
+// worse trade for the same coverage.
+func TestLiveBridgeRefusesValuesItCannotSend(t *testing.T) {
+	transport := liveTransport(t)
+
+	got, err := transport.Run(context.Background(), "return function() end", nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.OK {
+		t.Fatalf("a function came back as a result: %#v", got.Value)
+	}
+	if !strings.Contains(got.Err, "function") {
+		t.Errorf("error = %q, want it to name what could not be sent", got.Err)
+	}
+}
+
+// The mailbox is a source, and obs_source_update MERGES settings, so a reply
+// that does not write a key leaves the previous reply's value under it. A
+// failing call after a successful one therefore used to carry the earlier
+// call's result, which the Go side reads on every reply -- a failure that
+// arrives holding somebody else's data.
+func TestLiveBridgeFailureDoesNotCarryThePreviousResult(t *testing.T) {
+	transport := liveTransport(t)
+
+	first, err := transport.Run(context.Background(), `return { token = "from-the-first-call" }`, nil)
+	if err != nil {
+		t.Fatalf("Run (first): %v", err)
+	}
+	if !first.OK {
+		t.Fatalf("the first chunk failed: %s", first.Err)
+	}
+	if _, ok := first.Value.(map[string]interface{}); !ok {
+		t.Fatalf("the first result = %#v, want an object to be left behind", first.Value)
+	}
+
+	second, err := transport.Run(context.Background(), `error("the second call fails")`, nil)
+	if err != nil {
+		t.Fatalf("Run (second): %v", err)
+	}
+	if second.OK {
+		t.Fatal("a chunk that raised reported success")
+	}
+	if carried, ok := second.Value.(map[string]interface{}); ok {
+		t.Fatalf("a failed call carried a result payload: %#v", carried)
+	}
+	if text, ok := second.Value.(string); ok && text != "" {
+		t.Errorf("a failed call carried the stale result %q", text)
 	}
 }
