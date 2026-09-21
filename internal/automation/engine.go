@@ -50,6 +50,10 @@ type AutomationEngine struct {
 	// suppressor tells the engine's own writes apart from changes somebody else
 	// made, so a rule that reacts to what it does cannot feed itself. (FB-85)
 	suppressor *writeSuppressor
+
+	// breaker is the backstop for the loops suppression cannot identify: it
+	// disables a rule that keeps firing regardless of why. (FB-86)
+	breaker *breaker
 }
 
 // NewAutomationEngine creates a new automation engine.
@@ -62,6 +66,7 @@ func NewAutomationEngine(db *storage.DB, obsClient OBSClient) *AutomationEngine 
 		storage:                db,
 		executor:               NewExecutor(obsClient),
 		suppressor:             newWriteSuppressor(realClock{}, suppressTTL),
+		breaker:                newBreaker(realClock{}, oscillationThreshold, oscillationWindow),
 		rules:                  make(map[int64]*Rule),
 		cooldowns:              make(map[int64]time.Time),
 		eventChan:              make(chan EventPayload, 100),
@@ -90,6 +95,9 @@ func (e *AutomationEngine) setClock(c clock) {
 	e.clock = c
 	if e.suppressor != nil {
 		e.suppressor.setClock(c)
+	}
+	if e.breaker != nil {
+		e.breaker.setClock(c)
 	}
 }
 
@@ -383,9 +391,99 @@ func (e *AutomationEngine) dispatchEvent(payload EventPayload) {
 
 	// Execute matching rules
 	for _, rule := range matching {
+		// Counted here rather than inside executeRule, because this is where the
+		// decision to run is made. Counting after the fact would let a rule
+		// spawn an unbounded number of goroutines before any of them reported.
+		if tripped, count := e.breaker.Record(rule.ID); tripped {
+			e.tripRule(rule, count)
+			continue
+		}
 		e.wg.Add(1)
 		go e.executeRule(rule, &payload)
 	}
+}
+
+// oscillationError is the reason recorded against a rule the breaker disabled.
+// It is a fixed string so an operator, or a tool, can search for it.
+const oscillationError = "oscillation"
+
+// tripRule disables a runaway rule and records why.
+//
+// Disabling is written to the database as well as to the in-memory cache: a
+// rule that came back on the next restart, still oscillating, would be a worse
+// bug than the one this exists to stop.
+//
+// The execution row matters as much as the disabling. A rule that switched
+// itself off leaving no record is indistinguishable from one that never ran,
+// and the operator's first move -- turning it back on -- would walk straight
+// into the same loop.
+func (e *AutomationEngine) tripRule(rule *Rule, count int) {
+	// Stop the loop before doing anything that can fail.
+	//
+	// The order here is the whole fix. Writing to storage first looks tidier --
+	// persist, then reflect it in memory -- and it does not work: a runaway rule
+	// is already hammering the same SQLite file with its own execution rows, so
+	// every write the breaker attempts comes back SQLITE_BUSY and the rule stays
+	// enabled. The breaker was trying to record that it had tripped using the
+	// resource the rule it was stopping had saturated. Measured: the disable and
+	// the oscillation row both failed while the rule kept firing.
+	//
+	// Flipping the in-memory flag ends the storm in microseconds and needs
+	// nothing that can be contended. Everything after this runs against a quiet
+	// database.
+	//
+	// The direct cause of that failure was a missing busy_timeout, now set in
+	// internal/storage, and with it the writes succeed in either order -- so the
+	// tests pass whichever way round this is written. The order is kept because
+	// a busy_timeout is a bounded wait: a loop fast enough to hold the file for
+	// longer than the timeout would defeat it, and stopping first does not
+	// depend on how fast the loop is. Defence in depth, stated rather than
+	// implied, because nothing here proves it.
+	e.mu.Lock()
+	alreadyTripped := false
+	if cached, ok := e.rules[rule.ID]; ok {
+		alreadyTripped = !cached.Enabled
+		cached.Enabled = false
+	}
+	rule.Enabled = false
+	delete(e.cooldowns, rule.ID)
+	e.mu.Unlock()
+
+	if alreadyTripped {
+		// Events queued before the flag flipped can arrive after it. Tripping
+		// once per rule keeps one runaway from writing a hundred identical rows.
+		return
+	}
+
+	log.Printf("[Automation] Rule '%s' (ID %d) fired %d times in %v and has been "+
+		"disabled. Something it does is triggering it again; see ADR-010",
+		rule.Name, rule.ID, count, oscillationWindow)
+
+	now := e.clock.Now()
+	completed := now
+	if _, err := e.storage.CreateRuleExecution(e.ctx, storage.RuleExecution{
+		RuleID:      rule.ID,
+		RuleName:    rule.Name,
+		TriggerType: rule.TriggerType,
+		StartedAt:   now,
+		CompletedAt: &completed,
+		Status:      "failed",
+		Error:       oscillationError,
+	}); err != nil {
+		log.Printf("[Automation] Could not record the oscillation of rule '%s': %v",
+			rule.Name, err)
+	}
+
+	if err := e.storage.SetAutomationRuleEnabled(e.ctx, rule.ID, false); err != nil {
+		// Worth saying loudly: the rule is off in memory but would be back on at
+		// the next restart, still looping.
+		log.Printf("[Automation] Could not disable runaway rule '%s' in the database: %v",
+			rule.Name, err)
+	}
+
+	// A rule the operator turns back on starts with a clean history, or it
+	// would trip on its first execution and look permanently broken.
+	e.breaker.Forget(rule.ID)
 }
 
 // matchesFilter checks if event data matches the rule's event filter.

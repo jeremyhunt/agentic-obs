@@ -24,15 +24,15 @@ const (
 
 // Tool group state keys - control which tool categories are enabled
 const (
-	StateKeyToolsCore        = "tools_enabled_core"        // Core OBS tools (scenes, recording, streaming, status, virtual cam, replay, studio mode, hotkeys)
-	StateKeyToolsVisual      = "tools_enabled_visual"      // Visual monitoring tools (screenshots)
-	StateKeyToolsLayout      = "tools_enabled_layout"      // Layout management tools (scene presets)
-	StateKeyToolsAudio       = "tools_enabled_audio"       // Audio control tools
-	StateKeyToolsSources     = "tools_enabled_sources"     // Source management tools
-	StateKeyToolsDesign      = "tools_enabled_design"      // Scene design tools (source creation, transforms)
-	StateKeyToolsFilters     = "tools_enabled_filters"     // Filter management tools
-	StateKeyToolsTransitions = "tools_enabled_transitions" // Transition control tools
-	StateKeyToolsAutomation  = "tools_enabled_automation"  // Automation rule tools
+	StateKeyToolsCore                  = "tools_enabled_core"                    // Core OBS tools (scenes, recording, streaming, status, virtual cam, replay, studio mode, hotkeys)
+	StateKeyToolsVisual                = "tools_enabled_visual"                  // Visual monitoring tools (screenshots)
+	StateKeyToolsLayout                = "tools_enabled_layout"                  // Layout management tools (scene presets)
+	StateKeyToolsAudio                 = "tools_enabled_audio"                   // Audio control tools
+	StateKeyToolsSources               = "tools_enabled_sources"                 // Source management tools
+	StateKeyToolsDesign                = "tools_enabled_design"                  // Scene design tools (source creation, transforms)
+	StateKeyToolsFilters               = "tools_enabled_filters"                 // Filter management tools
+	StateKeyToolsTransitions           = "tools_enabled_transitions"             // Transition control tools
+	StateKeyToolsAutomation            = "tools_enabled_automation"              // Automation rule tools
 	StateKeyToolsAdvancedSceneSwitcher = "tools_enabled_advanced_scene_switcher" // Advanced Scene Switcher plugin tools
 )
 

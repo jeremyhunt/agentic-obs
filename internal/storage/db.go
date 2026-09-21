@@ -45,7 +45,15 @@ func New(ctx context.Context, cfg Config) (*DB, error) {
 
 	// Open database connection with appropriate settings
 	// modernc.org/sqlite uses the same connection string format as mattn/go-sqlite3
-	conn, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)")
+	//
+	// busy_timeout is not optional here. WAL lets readers run alongside a
+	// writer, but writers still serialise, and without a timeout the second one
+	// gets SQLITE_BUSY immediately rather than waiting its turn. With ten pooled
+	// connections and an automation engine that can run several rules at once,
+	// that means execution records are silently dropped under any burst -- which
+	// is exactly when the record matters. Found when a runaway rule saturated
+	// the file and the circuit breaker could not write down that it had tripped.
+	conn, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database at %s: %w", dbPath, err)
 	}

@@ -79,10 +79,24 @@ and in this codebase the event fan-out is shared — detaching would also blind
 the thumbnail cache and the MCP resource notifications for the duration of every
 write.
 
-**Still to come in this area:** per-rule debounce, and a re-entrancy circuit
-breaker that disables an oscillating rule and records `error=oscillation`.
-Suppression removes the common loop; neither of those is redundant, because a
-rule can still oscillate through a path the suppressor cannot key.
+**The circuit breaker landed alongside this (FB-86)** and is the backstop for
+exactly the gap above. It counts executions per rule over a sliding second and
+disables one that crosses twenty, recording `error=oscillation`. It does not
+need to understand *why* a rule is running away, which is the point: the hotkey
+case is unkeyable by construction, because the engine cannot know what a hotkey
+does.
+
+Two things that fix taught us. **A breaker must stop the loop before it records
+that it tripped** -- the first version wrote to SQLite first, and a runaway rule
+had already saturated the same file with its own execution rows, so every
+recovery write came back `SQLITE_BUSY` and the rule stayed enabled. And the
+underlying reason was that the database had **no `busy_timeout`**, so any
+concurrent writer failed instantly rather than waiting; that was silently losing
+execution records under any burst, not just this one.
+
+**Still to come:** per-rule debounce, which coalesces a burst into one execution.
+Not redundant with either of the above -- a rule can be correct, non-looping and
+still do ten times more work than it needs to.
 
 **Numbering note:** the design plan assigned this ADR the number 012, on the
 assumption that 009–011 would be taken by earlier increments. 009 was already in
