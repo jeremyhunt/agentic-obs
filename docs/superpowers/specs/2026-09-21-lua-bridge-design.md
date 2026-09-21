@@ -67,16 +67,31 @@ Stated accurately, and no more than that: the default binary contains no
 the four tools that address a source by name and write it —
 `set_source_settings`, `ensure_input`, `remove_source`, `duplicate_source`.
 
-**Two routes to the transport are still open, deliberately named here rather
-than left to be rediscovered.** `call_obs_request` is a raw obs-websocket
-passthrough (Core group, default-enabled, not elicited) and will issue
-`SetInputSettings` against any source, and `apply_scene_spec` writes the
-settings of any source a caller-supplied spec names, with `dry_run=false`.
-Closing either means deciding what a deliberately unrestricted escape hatch is
-allowed to reach, which is a design question this section does not settle.
+**The two further routes this section used to name as open are now closed**, at
+their own layers rather than in `bridge_reserved.go`, because neither passes
+through it.
 
-None of it is a boundary against whoever holds the obs-websocket password, who
-can write those settings directly or load their own script.
+- `call_obs_request`, a raw obs-websocket passthrough (Core group,
+  default-enabled, not elicited), would issue `SetInputSettings` against any
+  source. `checkRequestAllowed` (`internal/obs/dispatch.go`) now takes the
+  request data as well as its type and refuses any request whose payload
+  addresses a reserved name: a `*Name` or `*Uuid` key holding one, at any depth.
+  Content is not a target, so a text source whose text is
+  `"agentic-obs-inbox"` is still writable. `Get*` requests are left alone and
+  everything else is treated as a write, including a request this build has
+  never seen. Uuids are resolved at call time, because `GetInputList` stays open
+  and hands back the inbox's.
+- `apply_scene_spec` writes the settings of any source a caller-supplied spec
+  names, with `dry_run=false`. `scenespec.Apply` now refuses such a spec whole —
+  skipping the one source would report a success for an apply that did not do
+  what the document asked. Dry runs and `diff_scene_spec` stay open; they write
+  nothing.
+
+Stated accurately again: what is closed is *addressing the transport by name or
+uuid through this server's tools*. A settings write that never names it — a tool
+added later without this in mind — reaches it as `set_source_settings` once did.
+And none of it is a boundary against whoever holds the obs-websocket password,
+who can write those settings directly or load their own script.
 
 The runtime gate is the env var `AGENTIC_OBS_SCRIPTING=1`, deliberately *not* a
 value in SQLite: tool configuration lives there and `set_tool_config` can write

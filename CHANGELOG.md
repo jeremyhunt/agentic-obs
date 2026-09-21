@@ -23,10 +23,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stay open — they expose nothing `get_obs_status`'s `bridge` field does not
   already report.
 
-  `call_obs_request` and `apply_scene_spec` can still write the transport: the
-  first is a deliberately unrestricted obs-websocket passthrough, the second
-  writes whatever source a caller-supplied spec names. Both are recorded in
-  ADR-013 rather than closed here.
+- **`call_obs_request` reached the transport past that reservation** — the
+  passthrough's deny-list keys on the request *type*, so `SetInputSettings`
+  aimed at `agentic-obs-inbox` was not denied and nothing looked at the payload.
+  It is a Core-group, default-enabled, never-elicited tool, so this was the same
+  arbitrary code execution by another door.
+
+  Denying the type was not available: `SetInputSettings` is the request
+  `set_source_settings` wraps, and `CreateInput`, `SetInputName` and
+  `CreateSceneItem` reach the same two names anyway. So `checkRequestAllowed`
+  now takes the request data too and refuses on the *target*. A `*Name` or
+  `*Uuid` key holding a reserved value is a target, at any depth; the name
+  appearing as content is not, so a text source whose text is
+  `"agentic-obs-inbox"` still writes. `Get*` requests are left alone and
+  anything that is not a `Get*` is treated as a write, including a request this
+  build has never seen. Uuids are resolved at call time — `GetInputList` is a
+  read, it stays open, and it hands back the inbox's `inputUuid` — but only
+  when the payload actually carries one, so the ordinary call costs no extra
+  round trip.
+
+- **`apply_scene_spec` wrote the transport's settings from a caller's spec** —
+  an apply writes the settings of every input its spec names, and a spec is
+  supplied by the caller, so a hand-authored one naming the inbox carried the
+  scripting channel's payload to the place that executes it. A captured spec
+  never names it: the transport belongs to no scene.
+
+  `scenespec.Apply` refuses such a spec once `dry_run=false`, checking
+  placements as well as sources, and refuses the *whole* apply rather than
+  skipping that source — a partial apply reported as a success leaves a scene
+  neither the spec nor the operator describes. Dry runs and `diff_scene_spec`
+  are unaffected; they write nothing. `apply_scene_preset` shares the
+  reconciler and inherits the guard, though it could not reach the transport
+  regardless.
+
+  Together these close addressing the transport by name or uuid through this
+  server's tools. They do not make it unreachable: a settings write that never
+  names it would reach it, and nothing here is a boundary against whoever holds
+  the obs-websocket password. See
+  [ADR-012](design/decisions/012-extension-channel.md) and
+  [ADR-013](design/decisions/013-the-lua-bridge.md), decision 6.
 
 - **A preset could not express a source placed twice in one scene (FB-93)** —
   `apply_scene_preset` built a name-to-id map, so a scene holding the same source
@@ -67,9 +102,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   The build tag is not the whole gate on its own: the transport is addressed by
   source name, so the two names are reserved separately (see Fixed, above).
-  Accurately stated, the default binary contains no unreviewed eval path, and
-  the four tools that address a source by name and write it will not touch the
-  transport. `call_obs_request` and `apply_scene_spec` still can — see
+  Accurately stated, the default binary contains no unreviewed eval path, and no
+  tool here addresses the transport by name or by uuid — not the four that
+  address a source by name and write it, not `call_obs_request` and not
+  `apply_scene_spec`. What that does *not* say: the transport is not
+  unreachable. A settings write that never names it reaches it as
+  `set_source_settings` once did, and none of this is a boundary against
+  whoever holds the obs-websocket password. See
   [ADR-013](design/decisions/013-the-lua-bridge.md), decision 6.
 
 - **`apply_scene_preset` takes `dry_run` (FB-93)** — defaulting to **false**,

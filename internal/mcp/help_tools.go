@@ -464,6 +464,14 @@ SetCurrentSceneCollection and RemoveProfile. The first four have tools that
 confirm first; the last two rebuild or discard state that cannot be recovered
 from here.
 
+**Also refused, by target rather than by request**: anything that is not a Get*
+and whose request_data names "agentic-obs-inbox" or "agentic-obs-mailbox" in a
+*Name or *Uuid field. Those are the Lua bridge's transport, and writing the
+first runs code inside OBS -- use run_lua_in_obs for that, and 'agentic-obs
+uninstall-bridge' to take the bridge out. Reads of them are not refused, and the
+names appearing as a *value* elsewhere in the payload (a text source's text, a
+browser source's url) are not refused either.
+
 **Not reachable at all**: Get/SetSourcePrivateSettings and
 Get/SetSceneItemPrivateSettings. OBS offers them; the Go client library does not
 generate them yet.

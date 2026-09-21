@@ -157,31 +157,53 @@ Sources group.
 
 The two names are therefore refused by the general-purpose write and structural
 tools — `set_source_settings`, `ensure_input`, `remove_source`,
-`duplicate_source` — in `internal/mcp/bridge_reserved.go`, compared against the
-`internal/bridge` constants so a rename cannot leave a stale literal behind.
-Reads stay open: they expose nothing `get_obs_status`'s `bridge` field does not
-already report.
+`duplicate_source` — in `internal/mcp/bridge_reserved.go`, compared against
+`obs.IsBridgeTransport` so a rename cannot leave a stale literal behind. The two
+literals live in `internal/obs` rather than in `internal/bridge`, because
+`internal/bridge` imports `internal/obs` and the passthrough's guard is in
+`internal/obs/dispatch.go`; `internal/bridge` aliases them, so there is still
+one spelling of each name. Reads stay open: they expose nothing
+`get_obs_status`'s `bridge` field does not already report.
 
-**Two routes are still open, and are named here rather than left implicit.**
+**Two further routes address a source by name, and both are now closed** — each
+at its own layer, because neither passes through those helpers.
 
-- `call_obs_request` — Core group, default-enabled, not elicited — will issue
-  `SetInputSettings` against any source. ADR-012 gave it a deny-list, but
-  `deniedRequests`/`checkRequestAllowed` (`internal/obs/dispatch.go`) keys on
-  the request *type* alone and has no notion of a target, so covering this
-  would mean either denying `SetInputSettings` wholesale — it is the request
-  `set_source_settings` wraps, so the passthrough would lose a legitimate use —
-  or teaching that seam to inspect request data.
+- `call_obs_request` — Core group, default-enabled, not elicited — would issue
+  `SetInputSettings` against any source. ADR-012 gave it a deny-list keyed on
+  the request *type*, which cannot see a target, and denying `SetInputSettings`
+  wholesale was not an option: it is the request `set_source_settings` wraps,
+  and `CreateInput`, `SetInputName` and `CreateSceneItem` reach the same two
+  names anyway. So `checkRequestAllowed` now takes the request data too and
+  refuses on the target. A `*Name` or `*Uuid` key holding a reserved value is a
+  target, at any depth; everything else in the payload is content, so a text
+  source whose text is `"agentic-obs-inbox"` is still writable. `Get*` requests
+  are left alone, and everything that is not a `Get*` — including a request
+  this build has never seen — is treated as a write. Uuids are resolved at call
+  time, because `GetInputList` is a read, stays open, and hands back the
+  inbox's `inputUuid`. ADR-012 now records this as a second rule alongside the
+  deny-list.
 - `apply_scene_spec` writes the settings of any source a caller-supplied spec
   names, once `dry_run=false`. A captured spec never names the transport, which
-  belongs to no scene; a hand-authored one can.
+  belongs to no scene; a hand-authored one can. `scenespec.Apply` now refuses
+  such a spec whole rather than skipping that one source — a partial apply
+  reported as a success leaves a scene neither the spec nor the operator
+  describes — and checks placements as well as sources, since an item alone
+  would have `ensurePlacements` put the transport into a live scene. Dry runs
+  and `diff_scene_spec` stay open; they write nothing, and planning is how a
+  caller discovers a stored spec is contaminated. `apply_scene_preset` shares
+  the reconciler and inherits the guard, though it could not reach the
+  transport regardless: it masks to `fields: ["enabled"]`, a preset is built
+  only from a live scene capture, and entries naming sources the scene does not
+  hold are dropped before the spec is built.
 
-Both are design questions about what a deliberately unrestricted escape hatch
-may reach, not defects in the reservation, so this ADR records them rather than
-answering them. The reservation reduces what a mistake reaches; it does not
-make the transport unreachable.
-
-None of it is a boundary against whoever holds the obs-websocket password, who
-can write those settings directly.
+**What this achieves, and what it does not.** Together these close *addressing
+the transport by name or uuid through this server's tools*. They do not make the
+transport unreachable. A settings write that never names it — a future tool, an
+automation action, a code path added in this repo without the guard in mind —
+reaches it exactly as before; the guards are four call sites and two chokepoints,
+not a capability boundary the type system enforces. Nor is any of it a boundary
+against whoever holds the obs-websocket password, who can write those settings
+directly or load a script of their own.
 
 ## Alternatives rejected
 
@@ -229,7 +251,15 @@ can write those settings directly.
 - Installing the bridge means two source names are no longer the operator's to
   use. `agentic-obs-inbox` and `agentic-obs-mailbox` are refused by the write
   and structural tools whether or not the bridge is installed, since nothing
-  here can tell an operator's identically-named source from the transport.
+  here can tell an operator's identically-named source from the transport. Now
+  that `call_obs_request` refuses them too, the reservation extends to anything
+  bearing those names — a scene, a filter, a profile — because the guard reads
+  the payload's `*Name` keys rather than knowing what kind of thing each one
+  addresses.
+- The reservation is four call sites and two chokepoints, not a capability the
+  type system enforces. A settings write added later without it in mind reaches
+  the transport exactly as `set_source_settings` once did. The tests name the
+  routes; nothing stops a new one.
 - Chunks are untyped and unvalidated on the way in. A malformed one returns
   `ok=false` rather than a schema error.
 - Two sources exist in the operator's collection that belong to no scene. They

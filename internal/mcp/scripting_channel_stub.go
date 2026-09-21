@@ -13,8 +13,16 @@ package mcp
 // Compiling the tool out is not by itself the whole gate, and claiming it was
 // overstated the case. The bridge's transport is addressed by source name, so
 // a general-purpose settings write reaches it in any build; those two names
-// are reserved separately, in bridge_reserved.go. What this file guarantees is
-// narrower: the default binary carries no unreviewed eval path.
+// are reserved separately, in three places -- bridge_reserved.go for the tools
+// that address a source by name, internal/obs/dispatch.go for the raw
+// passthrough, and internal/scenespec/apply.go for a caller-supplied spec.
+//
+// Together those mean no tool in this build addresses the transport by name or
+// by uuid. What this file guarantees is still narrower, and narrower is the
+// honest word: the default binary carries no unreviewed eval path. It does not
+// guarantee the transport is unreachable -- a settings write added later
+// without the reservation in mind would reach it, and none of this binds
+// whoever holds the obs-websocket password.
 func registerScriptingChannel(s *Server) {}
 
 // scriptingToolNames is empty here: the default build serves no scripting

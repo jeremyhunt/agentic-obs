@@ -3,13 +3,14 @@ package mcp
 import (
 	"fmt"
 
-	"github.com/ironystock/agentic-obs/internal/bridge"
+	"github.com/ironystock/agentic-obs/internal/obs"
 )
 
 // The bridge's transport sources are reserved against the general-purpose
 // tools.
 //
-// The transport is a pair of sources addressed by NAME (internal/bridge:
+// The transport is a pair of sources addressed by NAME (internal/obs:
+// BridgeInboxSource and BridgeMailboxSource, aliased by internal/bridge as
 // InboxSource and MailboxSource). Anything that can write an arbitrary
 // settings map to an arbitrary source name can therefore write
 // {id, lua, args} to the inbox and read the answer back out of the mailbox --
@@ -26,19 +27,21 @@ import (
 // Reads (get_source_settings, list_sources) are deliberately left alone. They
 // expose nothing that get_obs_status's bridge field does not already report.
 //
-// This does NOT make the transport unreachable, and should not be read as if
-// it did. Two tools still write a source by name and are not guarded here:
-// call_obs_request, whose deny-list (internal/obs/dispatch.go) keys on the
-// request type and has no notion of a target, and apply_scene_spec, which
-// writes whatever source a caller-supplied spec names. Guarding either means
-// deciding what a deliberately unrestricted escape hatch may reach -- a design
-// question, recorded in ADR-013 decision 6 rather than answered here.
-
-// isBridgeTransport reports whether name is one of the bridge's two transport
-// sources. It compares against the constants so a rename in internal/bridge
-// cannot leave this guard pointing at a stale literal.
+// The two routes this file used to name as open are now closed, each at its
+// own layer rather than here, because neither passes through these helpers:
+// call_obs_request refuses a request whose payload addresses the transport by
+// name or by uuid (internal/obs/dispatch.go), and apply_scene_spec refuses a
+// spec that names it once dry_run is false (internal/scenespec/apply.go).
+// Together those close addressing the transport by name through this server's
+// tools. What none of it touches, and what no amount of guarding here could:
+// whoever holds the obs-websocket password can write those settings directly,
+// or load a script of their own.
+//
+// isBridgeTransport delegates to obs.IsBridgeTransport rather than comparing
+// the constants again, so there is one predicate for all four guard sites and
+// no second copy to drift.
 func isBridgeTransport(name string) bool {
-	return name == bridge.InboxSource || name == bridge.MailboxSource
+	return obs.IsBridgeTransport(name)
 }
 
 // errBridgeTransportWrite refuses a settings write to the transport.

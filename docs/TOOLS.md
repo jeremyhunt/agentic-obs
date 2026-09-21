@@ -3051,7 +3051,17 @@ refused by `set_source_settings`, `ensure_input`, `remove_source` and
 either breaks the bridge. Reads are unaffected. Use `agentic-obs
 uninstall-bridge` to take the bridge out.
 
-`call_obs_request` and `apply_scene_spec` are not guarded: the first is a raw
-obs-websocket passthrough by design, the second writes whatever source a
-caller-supplied spec names. The reservation reduces what a mistake reaches; it
-does not make the transport unreachable.
+`call_obs_request` and `apply_scene_spec` are guarded too, each in its own way.
+The passthrough refuses any request whose payload addresses a reserved name —
+through `inputName`, `sourceName`, `newInputName` or any other `*Name` or
+`*Uuid` field — unless it is a `Get*`, which is a read. The name appearing as
+*content* is not a target, so a text source reading "agentic-obs-inbox" still
+writes. `apply_scene_spec` refuses a spec that names the transport as a source
+or as a placement, once `dry_run=false`; it refuses the whole apply rather than
+skipping that one source, and dry runs and `diff_scene_spec` are unaffected
+because they write nothing.
+
+What that adds up to: no tool here addresses the transport by name or uuid. It
+does not make the transport unreachable — a settings write that never names it
+would reach it, and none of this is a boundary against whoever holds the
+obs-websocket password, who can write those settings directly.

@@ -68,6 +68,47 @@ surface cannot:
 The last two have no wrapper on purpose: switching collections tears down and
 rebuilds every source in OBS, and there is no way to undo it from here.
 
+**And a second rule, keyed on the target rather than the type (added by the Lua
+bridge, ADR-013).** The deny-list above works because a destructive request's
+whole identity is its verb: `RemoveScene` is dangerous wherever it is aimed. The
+bridge's transport inverts that. `agentic-obs-inbox` is an ordinary source until
+you write its settings, at which point a fixed request vocabulary becomes
+arbitrary code running on OBS's render thread — a different class from
+destructive-but-bounded, because what happens next is not in the protocol at
+all. And it is the *target* that makes it so: `SetInputSettings` is the request
+`set_source_settings` wraps, so denying the type would cost the passthrough a
+legitimate use and still leave `CreateInput`, `SetInputName` and
+`CreateSceneItem` aimed at the same two names.
+
+So `checkRequestAllowed` takes the request data as well as its type, and refuses
+any request whose payload addresses a reserved transport source. Three details
+are load-bearing:
+
+- **What counts as addressing is decided by key shape**, not by the three field
+  names that matter today. A `*Name` or `*Uuid` key holding a reserved value, at
+  any depth, is a target; anything else is content. Scanning every string value
+  instead would refuse `SetInputSettings` on a text source whose text happens to
+  be `"agentic-obs-inbox"`, which is an absurd refusal; the key rule covers
+  `sceneName`, `newInputName`, `destinationSceneName` and whatever the next OBS
+  release adds without this seam being edited.
+- **Reads stay open, and "read" is structural.** obs-websocket names every read
+  `Get*` and nothing else, so a request that is not a `Get*` is treated as a
+  write — including a request this build has never seen. Refusing reads would
+  buy nothing: `get_obs_status`'s `bridge` field already reports the transport's
+  presence. The live coverage test below reads `GetVersion` through this path
+  and is unaffected.
+- **A uuid is resolved, not ignored.** A name-only guard is one call away from
+  being bypassed — `GetInputList` is a read, it stays open, and it hands back
+  the inbox's `inputUuid`. The reserved names are therefore resolved to whatever
+  uuids OBS holds for them, *only* when the payload actually carries one, so the
+  common path costs no extra round trip. A lookup that fails refuses rather than
+  guesses; it only fails when OBS is unreachable, in which case the request was
+  going to fail anyway.
+
+This closes addressing the transport through this tool. It is not a boundary
+against whoever holds the obs-websocket password, who can issue the identical
+request directly.
+
 Calls route through the same middleware as every other tool, so action history
 and elicitation still apply, and `list_obs_requests` makes the surface
 discoverable rather than something an agent has to guess at.
@@ -151,6 +192,12 @@ contribution or the Lua bridge. If that list ever changes, the test says so.
 - The deny-list is a policy, and policies drift from the tools they defend. Each
   entry names its wrapper so the connection is visible in the error the caller
   gets.
+- The target rule reads the payload, so the passthrough is no longer *entirely*
+  unrestricted: a scene, filter or profile that someone names
+  `agentic-obs-inbox` cannot be acted on through this tool either. That is a
+  false positive, and it is the price of a rule that does not have to enumerate
+  request shapes. It also costs one `GetInputList` on the rare call that
+  addresses a source by uuid.
 - Probing for vendors is a guess dressed as a list. It reports what it found,
   never what exists.
 

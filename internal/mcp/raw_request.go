@@ -102,7 +102,8 @@ func (s *Server) handleListOBSRequests(ctx context.Context, request *mcpsdk.Call
 		"note": "Pass any of these to call_obs_request as request_type. Parameter names " +
 			"and response shapes are in the obs-websocket protocol reference; they use " +
 			"camelCase. A few destructive requests are refused in favour of the tools " +
-			"that confirm first.",
+			"that confirm first, and any non-Get request whose data names the Lua " +
+			"bridge's transport is refused whatever the request is.",
 	}
 	s.recordAction("list_obs_requests", "List OBS requests", input, result, true, time.Since(start))
 	return nil, result, nil
