@@ -21,6 +21,7 @@ EXPECTED_SKILLS=(
     "preset-manager"
     "studio-mode-operator"
     "advanced-scene-switcher"
+    "visual-workflow"
 )
 
 # Required frontmatter fields
@@ -40,12 +41,12 @@ echo "=========================================="
 echo "Claude Skills Validation"
 echo "=========================================="
 echo ""
+# Printed from the array rather than repeated beside it. The hand-written copy
+# had already drifted: it listed five of the six, omitting studio-mode-operator.
 echo "Expected skills: ${#EXPECTED_SKILLS[@]}"
-echo "  - streaming-assistant"
-echo "  - scene-designer"
-echo "  - audio-engineer"
-echo "  - preset-manager"
-echo "  - advanced-scene-switcher"
+for skill in "${EXPECTED_SKILLS[@]}"; do
+    echo "  - $skill"
+done
 echo ""
 
 ISSUES_FOUND=0

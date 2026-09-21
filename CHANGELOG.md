@@ -7,6 +7,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The visual-workflow skill (FB-90)** — the seventh skill, and the one that
+  spans more than this server. Making a visual asset and getting it on screen is
+  one loop, but it crosses four toolchains, and the boundary between them is the
+  design rule: **agentic-obs has no image processing and will never grow any.**
+  Its part is knowing the canvas, making a source exist, placing it with intent
+  and showing you the result in the same turn.
+
+  The skill is written against the tools actually on this machine rather than
+  the ones a generic guide would assume, because the catches are what make it
+  worth having: Gemini renders **JPEG only**, so there is no alpha and both
+  existing pipelines key a flat background out afterwards; ComfyUI is **stopped
+  on purpose** and costs a ~10 minute first model load, but yields real alpha
+  and carries a Flux-2-klein **outpaint** LoRA that reframes to a new aspect
+  ratio without stretching; `comfy_run.py` patches a fixed node contract; there
+  is **no ImageMagick here**, and `convert` on PATH is the NTFS filesystem
+  utility, so calling it on an image runs a different program entirely.
+
+  It also writes down the convention that removes layout arithmetic altogether:
+  emit every layer as a **full-canvas RGBA PNG** so each source sits at 0,0 with
+  scale 1.0 and z-order is the only variable. That is what the existing
+  starting-soon scene does, and it is why nine layers need no pixel coordinates.
+
+### Fixed
+- **verify-skills.sh printed a list that had drifted from its own array
+  (FB-90)** — the echoed skill names were a hand-written copy beside
+  `EXPECTED_SKILLS`, and already listed five of the six, omitting
+  `studio-mode-operator`. It now prints the array.
+
 - **A URL can have a second writer, and now survives one (FB-89)** —
   `preserve_url_params` on `ensure_input`, and the same field on a source in a
   scene spec. A browser source’s URL is one settings key, so a writer that

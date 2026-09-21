@@ -176,6 +176,28 @@ only incidentally touch studio mode.
 
 ---
 
+### 7. Visual Workflow (`visual-workflow`)
+
+**When to use**: Making or changing a visual asset and then getting it on screen — generating a background, fixing an aspect ratio, recovering transparency, replacing a logo, assembling a layer stack
+
+**Key capabilities**:
+- The whole loop: originate → condition → place → look → adjust → persist
+- Which tool originates what, and the catch in each: Gemini renders JPEG only
+  (no alpha), ComfyUI is stopped by default but yields real alpha and can
+  outpaint to a new aspect ratio, Canva exports a design, krita-mcp drives a
+  live Krita
+- The traps: there is no ImageMagick here and `convert` on PATH is the NTFS
+  filesystem utility; there is no SVG rasteriser anywhere
+- The layer-stack convention that removes layout maths entirely — full-canvas
+  RGBA layers at 0,0 / scale 1.0, where z-order is the only variable
+- Browser-source reload rules, and the two-writer URL case
+
+**Tools used**: `get_obs_status`, `ensure_input`, `set_source_transform`, `take_screenshot`, `capture_scene_spec`, `apply_scene_spec`, `set_source_settings`, `press_source_properties_button`
+
+**Best for**: Iterating on stream art without leaving the conversation. agentic-obs contributes the canvas, the placement and the screenshot; the image tools already on this machine do the rest.
+
+---
+
 ## Skill Selection Guide
 
 Claude will automatically select the appropriate skill based on your request. However, you can explicitly invoke a skill:
@@ -194,6 +216,9 @@ Claude will automatically select the appropriate skill based on your request. Ho
 | "Preview the next scene before switching" | `studio-mode-operator` |
 | "Auto-mute mic when I switch to BRB" | `streaming-assistant` (automation) |
 | "Add chroma key to my webcam" | `scene-designer` (filters) |
+| "Generate a background for my starting screen" | `visual-workflow` |
+| "This overlay is the wrong aspect ratio" | `visual-workflow` |
+| "Cut the background out of this render" | `visual-workflow` |
 | "Enable studio mode and rehearse the transition" | `studio-mode-operator` |
 | "Fade to the Intermission scene over 800ms" | `studio-mode-operator` |
 | "Run my pentakill macro" | `advanced-scene-switcher` |
