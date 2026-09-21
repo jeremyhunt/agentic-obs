@@ -85,6 +85,8 @@ func (s *Server) handleCaptureSceneSpec(ctx context.Context, request *mcpsdk.Cal
 type DiffSceneSpecInput struct {
 	Spec      *scenespec.Spec `json:"spec" jsonschema:"A spec document, as returned by capture_scene_spec"`
 	SceneName string          `json:"scene_name,omitempty" jsonschema:"Scene to compare against. Defaults to the scene the spec was captured from"`
+
+	Fields []string `json:"fields,omitempty" jsonschema:"Aspects to compare: source, placement, kind, settings, filters, transform, enabled, locked, blend_mode, order. Omit for all of them"`
 }
 
 // handleDiffSceneSpec reports what differs between a spec and a scene.
@@ -120,7 +122,8 @@ func (s *Server) handleDiffSceneSpec(ctx context.Context, request *mcpsdk.CallTo
 
 	log.Printf("Diffing scene spec against %s", scene)
 
-	findings, err := scenespec.Diff(s.obsClient, input.Spec, scene)
+	findings, err := scenespec.DiffWith(s.obsClient, input.Spec, scene,
+		scenespec.DiffOptions{Fields: input.Fields})
 	if err != nil {
 		return fail(fmt.Errorf("diffing scene %q: %w", scene, err))
 	}
@@ -137,8 +140,18 @@ func (s *Server) handleDiffSceneSpec(ctx context.Context, request *mcpsdk.CallTo
 		"by_kind":  counts,
 		"matches":  len(findings) == 0,
 	}
+	if len(input.Fields) > 0 {
+		// Said before anything else, because "matches" below means "matches in
+		// the aspects that were compared" and would otherwise read as more.
+		result["fields"] = input.Fields
+	}
 	if len(findings) == 0 {
 		result["note"] = "The scene matches the spec."
+		if len(input.Fields) > 0 {
+			result["note"] = fmt.Sprintf(
+				"The scene matches the spec in %s. Nothing else was compared.",
+				strings.Join(input.Fields, ", "))
+		}
 	} else {
 		result["note"] = "drift is a managed value that moved; missing is in the spec " +
 			"and not the scene; unmanaged is in the scene and not the spec, and an " +
@@ -157,6 +170,8 @@ type ApplySceneSpecInput struct {
 
 	DryRun      *bool  `json:"dry_run,omitempty" jsonschema:"Plan without writing. DEFAULTS TO TRUE: pass false to actually change the scene"`
 	OnUnmanaged string `json:"on_unmanaged,omitempty" jsonschema:"What to do with things the scene has and the spec does not: keep (default), hide, or remove. remove takes out scene items only and never the sources behind them"`
+
+	Fields []string `json:"fields,omitempty" jsonschema:"Aspects to reconcile: source, placement, kind, settings, filters, transform, enabled, locked, blend_mode, order. Omit for all of them. fields=[enabled] is a visibility preset"`
 }
 
 // handleApplySceneSpec reconciles a scene to a spec.
@@ -205,6 +220,7 @@ func (s *Server) handleApplySceneSpec(ctx context.Context, request *mcpsdk.CallT
 	report, err := scenespec.Apply(ctx, s.obsClient, input.Spec, scene, scenespec.ApplyOptions{
 		DryRun:      dryRun,
 		OnUnmanaged: input.OnUnmanaged,
+		Fields:      input.Fields,
 	})
 	if err != nil {
 		return fail(fmt.Errorf("applying to scene %q: %w", scene, err))
