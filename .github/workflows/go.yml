@@ -23,8 +23,23 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      # The scripting channel lives behind -tags scripting, so nothing above
+      # compiles it. A rename in Server, recordAction or bridge.Transport would
+      # break that build while CI stayed green, and the breakage would only
+      # show up on the private branch that actually uses it.
+      - name: Build with the scripting tag
+        run: go build -tags scripting ./...
+
       - name: Run go vet
         run: go vet ./...
+
+      # vet compiles test files too, so this also guards the build-tagged
+      # tests -- including internal/bridge's obslive suite, which is the only
+      # verification the bridge's Lua gets and which nothing else here builds.
+      - name: Run go vet with the build tags
+        run: |
+          go vet -tags scripting ./...
+          go vet -tags obslive ./...
 
       - name: Check formatting
         run: |
@@ -36,6 +51,13 @@ jobs:
 
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out ./...
+
+      # The tagged tests are invisible to the run above. AGENTIC_OBS_SCRIPTING
+      # is deliberately NOT set: the tool's own tests cover both states, and
+      # setting it here would make every other test run against a server that
+      # serves run_lua_in_obs.
+      - name: Run tests with the scripting tag
+        run: go test -race -tags scripting ./...
 
       # Tool counts and help entries live in Go source, so a Go-only change can
       # break documentation consistency without touching a .md file. docs-check
