@@ -16,6 +16,8 @@ This directory documents significant architectural decisions for the agentic-obs
 | [008](008-mcp-apps-port.md) | MCP Apps Spec Port (FB-32) | Proposed | 2026-04-18 |
 | [009](009-advanced-scene-switcher.md) | Advanced Scene Switcher Tool Group (FB-51) | Accepted | 2026-05-28 |
 | [010](010-self-write-suppression.md) | Self-Write Suppression in the Automation Engine (FB-85) | Accepted | 2026-09-21 |
+| [011](011-declarative-scene-specs.md) | Declarative Scene Specs (FB-82, FB-83, FB-84, FB-89) | Accepted | 2026-09-21 |
+| [012](012-extension-channel.md) | The Extension Channel: Vendor Requests and a Raw-Request Passthrough (FB-77, FB-78, FB-81) | Accepted | 2026-09-21 |
 
 ## ADR Template
 
