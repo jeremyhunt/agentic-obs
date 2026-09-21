@@ -59,6 +59,14 @@ type Transport struct {
 
 	mu      sync.Mutex
 	pending *pending
+
+	// PresenceTTL bounds how long a Probe result is reused. Now is a clock
+	// seam so tests can move time rather than sleep through it, matching the
+	// automation engine.
+	PresenceTTL time.Duration
+	Now         func() time.Time
+
+	presence presenceCache
 }
 
 type pending struct {
@@ -67,7 +75,7 @@ type pending struct {
 }
 
 func New(caller Caller) *Transport {
-	return &Transport{caller: caller, Timeout: DefaultTimeout}
+	return &Transport{caller: caller, Timeout: DefaultTimeout, PresenceTTL: DefaultPresenceTTL}
 }
 
 // Run ships lua with args and waits for the bridge's answer.
