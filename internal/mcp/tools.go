@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ironystock/agentic-obs/internal/obs"
+	"github.com/ironystock/agentic-obs/internal/scenespec"
 	"github.com/ironystock/agentic-obs/internal/storage"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -86,6 +87,20 @@ type ListPresetsInput struct {
 // PresetNameInput is the input for preset operations by name
 type PresetNameInput struct {
 	PresetName string `json:"preset_name" jsonschema:"Name of the preset to operate on"`
+}
+
+// ApplyPresetInput is the input for applying a preset.
+//
+// It is separate from PresetNameInput because dry_run belongs to this tool and
+// not to deleting a preset or reading one.
+type ApplyPresetInput struct {
+	PresetName string `json:"preset_name" jsonschema:"Name of the preset to apply"`
+
+	// DryRun defaults to FALSE here, where apply_scene_spec defaults it to
+	// true. A preset changes visibility and nothing else, it is what an operator
+	// reaches for mid-stream, and every existing caller expects the write. The
+	// dry run is there for when the preset is old and the scene has moved on.
+	DryRun *bool `json:"dry_run,omitempty" jsonschema:"Plan without writing. Defaults to false: a preset applies immediately"`
 }
 
 // RenamePresetInput is the input for renaming a preset
@@ -1810,19 +1825,23 @@ func (s *Server) handleSaveScenePreset(ctx context.Context, request *mcpsdk.Call
 	start := time.Now()
 	log.Printf("Saving scene preset '%s' for scene '%s'", input.PresetName, input.SceneName)
 
-	// Capture current scene state from OBS
-	states, err := s.obsClient.CaptureSceneState(input.SceneName)
+	// Read the scene directly. CaptureSceneState was a wrapper around exactly
+	// this and nothing else, and it existed only so a preset had a method of
+	// its own; with presets expressed as a masked scene spec it had no second
+	// caller.
+	scene, err := s.obsClient.GetSceneByName(input.SceneName)
 	if err != nil {
 		s.recordAction("save_scene_preset", "Save scene preset", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to capture scene state: %w", err)
 	}
 
-	// Convert OBS source states to storage format
-	sources := make([]storage.SourceState, len(states))
-	for i, state := range states {
+	// Order is kept, because a source placed twice in one scene appears twice
+	// here, and applying the preset addresses those placements in that order.
+	sources := make([]storage.SourceState, len(scene.Sources))
+	for i, src := range scene.Sources {
 		sources[i] = storage.SourceState{
-			Name:    state.Name,
-			Visible: state.Enabled,
+			Name:    src.Name,
+			Visible: src.Enabled,
 		}
 	}
 
@@ -1850,61 +1869,101 @@ func (s *Server) handleSaveScenePreset(ctx context.Context, request *mcpsdk.Call
 	return nil, result, nil
 }
 
-// handleApplyScenePreset loads a saved preset and applies its source visibility states
-// to the target OBS scene. Sources that no longer exist in the scene are skipped.
-// Returns the preset_name, scene_name, applied_count, and a success message.
-// Returns an error if the preset does not exist, the scene no longer exists, or OBS is not connected.
-func (s *Server) handleApplyScenePreset(ctx context.Context, request *mcpsdk.CallToolRequest, input PresetNameInput) (*mcpsdk.CallToolResult, any, error) {
+// handleApplyScenePreset restores the source visibility a preset records.
+//
+// A preset is a scene spec restricted to one aspect -- which sources are shown
+// -- so it goes through the same reconciler as apply_scene_spec, with
+// fields=[enabled] (ADR-011). That is not tidiness: it is what stops presets and
+// specs growing separate ideas of what "apply" means, and it brings a dry run
+// and a per-op report along for nothing.
+//
+// It also fixes a case the name-to-id lookup could not express. A source placed
+// twice in one scene -- jurmiey_avatar is, in Game -- appears twice in a preset
+// under one name, and the map collapsed both onto whichever placement it saw
+// last, leaving the other wherever it happened to be.
+//
+// Sources the scene no longer holds are skipped rather than failing. A preset
+// outlives the scene it came from, and refusing the whole thing because one
+// layer was deleted would make old presets useless.
+func (s *Server) handleApplyScenePreset(ctx context.Context, request *mcpsdk.CallToolRequest, input ApplyPresetInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
-	log.Printf("Applying scene preset: %s", input.PresetName)
 
-	// Load preset from storage
+	fail := func(err error) (*mcpsdk.CallToolResult, any, error) {
+		s.recordAction("apply_scene_preset", "Apply scene preset", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+
 	preset, err := s.storage.GetScenePreset(ctx, input.PresetName)
 	if err != nil {
-		s.recordAction("apply_scene_preset", "Apply scene preset", input, nil, false, time.Since(start))
-		return nil, nil, fmt.Errorf("failed to load preset: %w", err)
+		return fail(fmt.Errorf("failed to load preset: %w", err))
 	}
 
-	// Get current scene items to map names to IDs
 	scene, err := s.obsClient.GetSceneByName(preset.SceneName)
 	if err != nil {
-		s.recordAction("apply_scene_preset", "Apply scene preset", input, nil, false, time.Since(start))
-		return nil, nil, fmt.Errorf("failed to get scene '%s': %w", preset.SceneName, err)
+		return fail(fmt.Errorf("failed to get scene '%s': %w", preset.SceneName, err))
 	}
 
-	// Build name-to-ID map
-	nameToID := make(map[string]int)
+	// Entries for sources the scene no longer holds come out before the spec is
+	// built: a spec naming them would report them missing, and an apply
+	// restricted to visibility cannot create one anyway. Counting rather than
+	// checking membership is what keeps a doubly-placed source honest -- two
+	// entries are applicable only if there really are two placements.
+	present := map[string]int{}
 	for _, src := range scene.Sources {
-		nameToID[src.Name] = src.ID
+		present[src.Name]++
 	}
-
-	// Convert storage format to OBS source states
-	obsStates := make([]obs.SourceState, 0, len(preset.Sources))
+	seen := map[string]int{}
+	applicable := make([]storage.SourceState, 0, len(preset.Sources))
 	for _, src := range preset.Sources {
-		id, exists := nameToID[src.Name]
-		if !exists {
+		if seen[src.Name] >= present[src.Name] {
 			log.Printf("Warning: source '%s' not found in scene, skipping", src.Name)
 			continue
 		}
-		obsStates = append(obsStates, obs.SourceState{
-			ID:      id,
-			Name:    src.Name,
-			Enabled: src.Visible,
-		})
+		seen[src.Name]++
+		applicable = append(applicable, src)
 	}
 
-	// Apply preset to OBS
-	if err := s.obsClient.ApplyScenePreset(preset.SceneName, obsStates); err != nil {
-		s.recordAction("apply_scene_preset", "Apply scene preset", input, nil, false, time.Since(start))
-		return nil, nil, fmt.Errorf("failed to apply preset: %w", err)
+	dryRun := false
+	if input.DryRun != nil {
+		dryRun = *input.DryRun
+	}
+	log.Printf("Applying scene preset %q to %q (dry_run=%v)", input.PresetName, preset.SceneName, dryRun)
+
+	report, err := scenespec.Apply(ctx, s.obsClient, presetToSpec(preset.SceneName, applicable),
+		preset.SceneName, scenespec.ApplyOptions{
+			DryRun: dryRun,
+			Fields: []string{scenespec.FieldEnabled},
+		})
+	if err != nil {
+		return fail(fmt.Errorf("failed to apply preset: %w", err))
+	}
+
+	failures := []string{}
+	for _, op := range report.Ops {
+		if op.Result == scenespec.OpFailed {
+			failures = append(failures, op.Subject+": "+op.Detail)
+		}
 	}
 
 	result := map[string]interface{}{
 		"preset_name":   input.PresetName,
 		"scene_name":    preset.SceneName,
-		"applied_count": len(obsStates),
-		"message":       fmt.Sprintf("Successfully applied preset '%s' to scene '%s'", input.PresetName, preset.SceneName),
+		"applied_count": len(applicable),
+		"dry_run":       dryRun,
+		"ops":           report.Ops,
+		"message": fmt.Sprintf("Successfully applied preset '%s' to scene '%s'",
+			input.PresetName, preset.SceneName),
 	}
+	if dryRun {
+		result["message"] = fmt.Sprintf("Dry run: preset '%s' would be applied to scene '%s'",
+			input.PresetName, preset.SceneName)
+	}
+	if len(failures) > 0 {
+		// Reported rather than returned as an error: the rest of the preset did
+		// land, and a caller told only "failed" would not know that.
+		result["failures"] = failures
+	}
+
 	s.recordAction("apply_scene_preset", "Apply scene preset", input, result, true, time.Since(start))
 	return nil, result, nil
 }

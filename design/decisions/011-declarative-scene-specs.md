@@ -1,4 +1,4 @@
-# ADR-011: Declarative Scene Specs (FB-82, FB-83, FB-84, FB-89, FB-91)
+# ADR-011: Declarative Scene Specs (FB-82, FB-83, FB-84, FB-89, FB-91, FB-92, FB-93)
 
 **Status:** Accepted
 **Date:** 2026-09-21
@@ -142,7 +142,28 @@ OBS is normal -- a locked source, a moved file -- and a run that stopped without
 saying how far it got is worse than one that finished and reported four
 failures. Ops that depended on a failed op are reported `skipped` with the cause.
 
-### 7. The pre-apply capture is the undo
+### 7. A preset is a spec with everything but visibility masked out
+
+A caller often owns only part of a scene, so a diff or an apply takes `fields`:
+the aspects it may consider, out of source, placement, kind, settings, filters,
+transform, enabled, locked, blend_mode and order. It is expressed once, on the
+diff, and the apply inherits it because an apply acts on a diff -- only the
+steps that are *not* findings needed their own gate.
+
+An unknown name is **rejected, not ignored**. A mask that quietly matched
+nothing would make a diff report no differences and an apply write nothing, and
+both would look exactly like success. For the same reason a restricted report
+echoes what it looked at.
+
+`apply_scene_preset` is then `fields=["enabled"]` over a spec built from the
+saved rows, and `CaptureSceneState`/`ApplyScenePreset` have left the client --
+86 methods rather than 88. This is not only tidiness. The old path built a
+name-to-id map, which cannot express a source placed twice in one scene:
+`jurmiey_avatar` is, in `Game`, so a preset of that scene carried two entries
+under one name and both landed on whichever placement the map saw last. A spec
+addresses a placement as source plus occurrence, so both land.
+
+### 8. The pre-apply capture is the undo
 
 An apply returns `before`: the scene as it was, captured before anything was
 written. Nothing else records what was replaced, and applying that document puts
@@ -204,10 +225,6 @@ author knows which parameters are foreign.
   `obs://spec/{name}`: until a named baseline is wanted. Specs are inline
   documents first, because the consumer that motivated this keeps its scene
   definition in a git repo, not in a server's database.
-- **A `presetToSpec` adapter.** `apply_scene_preset` still routes through
-  `CaptureSceneState`/`ApplyScenePreset` on the client rather than through
-  `Diff`/`Apply` with `fields=[enabled]`. Folding it in removes two methods from
-  `OBSClient` and gives presets the dry run and the per-op report for free.
 - **`RequestBatch` (opcodes 8/9).** The server implements it fully --
   `SerialRealtime`, `SerialFrame` and `Parallel`, with `haltOnFailure` and a
   `variables` object threaded through the batch. **`goobs` v1.8.3 does not**:
@@ -228,6 +245,8 @@ author knows which parameters are foreign.
 - A spec written with layouts survives a canvas change: it reports drift and
   applies back to the right size, where a spec of absolute numbers reports
   nothing and quietly leaves every layer at the old resolution.
+- Presets gained a dry run and a per-op report by being expressed as specs, and
+  stopped mis-handling a source placed twice in one scene.
 
 ### Negative
 - A capture of a scene with a nested scene is incomplete on its own; the nested

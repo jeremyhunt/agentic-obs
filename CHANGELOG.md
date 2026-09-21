@@ -6,7 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **A preset could not express a source placed twice in one scene (FB-93)** —
+  `apply_scene_preset` built a name-to-id map, so a scene holding the same source
+  twice produced two preset entries under one name and both landed on whichever
+  placement the map saw last. The other kept whatever state it had.
+  `jurmiey_avatar` is placed twice in `Game`, so this was live rather than
+  theoretical.
+
+  A preset is a scene spec restricted to one aspect, so it now runs through the
+  same reconciler with `fields: ["enabled"]`, and a spec addresses a placement as
+  source plus occurrence. Both placements land.
+
 ### Added
+- **`apply_scene_preset` takes `dry_run` (FB-93)** — defaulting to **false**,
+  unlike `apply_scene_spec`. A preset changes visibility and nothing else and is
+  what an operator reaches for mid-stream, so every existing caller still gets
+  the write. The result also carries the per-op list, which it never had.
+
+### Changed
+- **`CaptureSceneState` and `ApplyScenePreset` have left the client (FB-93)** —
+  86 methods on `OBSClient` rather than 88, and one reconciler instead of two.
+  `CaptureSceneState` was a wrapper around `GetSceneByName` and nothing else; it
+  existed only so presets had a method of their own. The count ratchet in
+  `roles_test.go` caught the change, which is what it is there for.
+
 - **A diff or an apply can be restricted to the part of a scene you own
   (FB-92)** — `fields` on `diff_scene_spec` and `apply_scene_spec`, naming the
   aspects to consider: source, placement, kind, settings, filters, transform,

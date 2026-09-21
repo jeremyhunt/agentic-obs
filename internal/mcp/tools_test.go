@@ -959,7 +959,7 @@ func TestHandleApplyScenePreset(t *testing.T) {
 			},
 		})
 
-		input := PresetNameInput{PresetName: "Test Preset"}
+		input := ApplyPresetInput{PresetName: "Test Preset"}
 		_, result, err := server.handleApplyScenePreset(context.Background(), nil, input)
 
 		assert.NoError(t, err)
@@ -982,7 +982,7 @@ func TestHandleApplyScenePreset(t *testing.T) {
 	t.Run("returns error for non-existent preset", func(t *testing.T) {
 		server, _, _ := testServerWithStorage(t)
 
-		input := PresetNameInput{PresetName: "NonExistent"}
+		input := ApplyPresetInput{PresetName: "NonExistent"}
 		_, _, err := server.handleApplyScenePreset(context.Background(), nil, input)
 
 		assert.Error(t, err)
@@ -1002,7 +1002,7 @@ func TestHandleApplyScenePreset(t *testing.T) {
 			},
 		})
 
-		input := PresetNameInput{PresetName: "Preset With Missing Source"}
+		input := ApplyPresetInput{PresetName: "Preset With Missing Source"}
 		_, result, err := server.handleApplyScenePreset(context.Background(), nil, input)
 
 		// Should succeed but only apply 1 source
@@ -1026,7 +1026,7 @@ func TestPresetWorkflow(t *testing.T) {
 		mock.ToggleSourceVisibility("Scene 1", 1) // Toggle Webcam
 
 		// Apply the saved preset to restore original state
-		applyInput := PresetNameInput{PresetName: "Scene1 State"}
+		applyInput := ApplyPresetInput{PresetName: "Scene1 State"}
 		_, _, err = server.handleApplyScenePreset(context.Background(), nil, applyInput)
 		require.NoError(t, err)
 

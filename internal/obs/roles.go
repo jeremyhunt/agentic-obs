@@ -198,16 +198,6 @@ type CanvasReader interface {
 	GetVideoSettings() (*VideoSettings, error)
 }
 
-// ScenePresetOperator captures and re-applies source visibility for a scene.
-//
-// Scheduled to leave the client: a preset is a scene spec with everything but
-// visibility masked out, so these become a planner concern rather than two more
-// transport methods.
-type ScenePresetOperator interface {
-	CaptureSceneState(sceneName string) ([]SourceState, error)
-	ApplyScenePreset(sceneName string, sources []SourceState) error
-}
-
 // AdvancedSceneSwitcherController talks to the Advanced Scene Switcher plugin
 // over its websocket vendor. All three are fire-and-forget -- ASS returns no
 // useful data, so the wrappers only surface errors.
@@ -274,7 +264,6 @@ var (
 	_ Screenshotter                   = (*Client)(nil)
 	_ StatusReader                    = (*Client)(nil)
 	_ CanvasReader                    = (*Client)(nil)
-	_ ScenePresetOperator             = (*Client)(nil)
 	_ AdvancedSceneSwitcherController = (*Client)(nil)
 	_ EventSource                     = (*Client)(nil)
 	_ VendorCaller                    = (*Client)(nil)
