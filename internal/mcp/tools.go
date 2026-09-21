@@ -1259,6 +1259,9 @@ func (s *Server) registerToolHandlers() {
 	log.Println("Meta tools registered (help, get_tool_config, set_tool_config, list_tool_groups)")
 
 	log.Printf("Tool handlers registered successfully (%d tools total)", toolCount)
+
+	// Present only in a build made with -tags scripting; a no-op otherwise.
+	registerScriptingChannel(s)
 }
 
 // Tool handler implementations

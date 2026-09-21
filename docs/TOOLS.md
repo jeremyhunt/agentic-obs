@@ -2980,3 +2980,19 @@ Prompts use both tools and resources internally:
 **Total Resources:** 4 types (scenes, screenshots, screenshot-url, presets)
 **Total Prompts:** 14
 **Total API Endpoints:** 8
+
+## Scripting channel (not in default builds)
+
+`run_lua_in_obs` is absent unless agentic-obs was built with `-tags scripting`
+**and** started with `AGENTIC_OBS_SCRIPTING=1`. It runs arbitrary Lua inside the
+OBS process, on the render thread, through the bridge.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `lua` | string | Source to compile and run. Return a value to receive it. |
+| `args` | object | Data the chunk reads as `args`. Pass parameters here; never build them into `lua`. |
+
+The chunk runs in a sandbox: `obslua` is available, `os`, `io`, `package`,
+`debug` and the `loadstring`/`setfenv` family are not. It is bounded at
+2,000,000 instructions so a runaway loop cannot hang OBS. Every call asks for
+confirmation and the full source is written to action history.
