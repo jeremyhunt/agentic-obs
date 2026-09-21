@@ -59,8 +59,6 @@ type MockOBSClient struct {
 	ErrorOnSetInputVolume      error
 	ErrorOnGetInputVolume      error
 	ErrorOnGetOBSStatus        error
-	ErrorOnCaptureSceneState   error
-	ErrorOnApplyScenePreset    error
 	ErrorOnTakeScreenshot      error
 	ErrorOnCreateBrowserSource error
 
@@ -756,56 +754,6 @@ func (m *MockOBSClient) SetInputVolumeState(inputName string, volume float64) {
 // SetEventCallback is a no-op for the mock client since we don't need event handling in tests.
 func (m *MockOBSClient) SetEventCallback(callback obs.EventCallback) {
 	// No-op for mock - events are not simulated
-}
-
-// CaptureSceneState returns the current source states for a scene.
-func (m *MockOBSClient) CaptureSceneState(sceneName string) ([]obs.SourceState, error) {
-	if m.ErrorOnCaptureSceneState != nil {
-		return nil, m.ErrorOnCaptureSceneState
-	}
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	scene, err := m.world.GetSceneByName(sceneName)
-	if err != nil {
-		return nil, fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	states := make([]obs.SourceState, len(scene.Sources))
-	for i, item := range scene.Sources {
-		states[i] = obs.SourceState{ID: item.ID, Name: item.Name, Enabled: item.Enabled}
-	}
-	return states, nil
-}
-
-// ApplyScenePreset applies source visibility states to a scene.
-func (m *MockOBSClient) ApplyScenePreset(sceneName string, sources []obs.SourceState) error {
-	if m.ErrorOnApplyScenePreset != nil {
-		return m.ErrorOnApplyScenePreset
-	}
-	if !m.connected {
-		return fmt.Errorf("not connected to OBS")
-	}
-
-	scene, err := m.world.GetSceneByName(sceneName)
-	if err != nil {
-		return fmt.Errorf("scene '%s' not found", sceneName)
-	}
-
-	known := map[int]bool{}
-	for _, item := range scene.Sources {
-		known[item.ID] = true
-	}
-	for _, want := range sources {
-		if !known[want.ID] {
-			return fmt.Errorf("source ID %d not found in scene '%s'", want.ID, sceneName)
-		}
-		if err := m.world.SetSceneItemEnabled(sceneName, want.ID, want.Enabled); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // TakeSourceScreenshot simulates taking a screenshot of a source.

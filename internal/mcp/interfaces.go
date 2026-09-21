@@ -32,7 +32,6 @@ type OBSClient interface {
 	obs.Screenshotter
 	obs.StatusReader
 	obs.CanvasReader
-	obs.ScenePresetOperator
 	obs.AdvancedSceneSwitcherController
 	obs.VendorCaller
 	obs.RawRequester

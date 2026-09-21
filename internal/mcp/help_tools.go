@@ -968,11 +968,17 @@ is what you write back with set_source_settings.`,
 
 **Input**:
 - preset_name (string, required): Name of preset to apply
+- dry_run (bool, optional, default FALSE): Report what would change without
+  writing. It defaults to false here, unlike apply_scene_spec: a preset changes
+  visibility and nothing else, and it is what you reach for mid-stream
 
 **Output**:
 - preset_name: Preset name
 - scene_name: Scene name
-- applied_count: Number of sources updated
+- applied_count: Number of the preset's sources the scene still holds
+- dry_run: Whether anything was written
+- ops: One entry per placement, with created/updated/unchanged/skipped/failed
+- failures: Present only if some placements failed while others landed
 - message: Success confirmation
 
 **Example Input**:
@@ -980,7 +986,15 @@ is what you write back with set_source_settings.`,
   "preset_name": "gaming_webcam_only"
 }
 
-**Note**: Sources that no longer exist in the scene are skipped automatically.`,
+**Note**: Sources that no longer exist in the scene are skipped automatically.
+A preset outlives the scene it came from, and refusing the whole thing because
+one layer was deleted would make old presets useless.
+
+**A preset is a scene spec with everything but visibility masked out**, and it
+runs through the same reconciler as apply_scene_spec with fields=["enabled"].
+That is why a source placed twice in one scene now works: a preset holds two
+entries under one name, and a spec addresses a placement as source plus
+occurrence rather than by name alone.`,
 
 	"list_scene_presets": `# list_scene_presets
 
