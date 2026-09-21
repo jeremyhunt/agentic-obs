@@ -94,9 +94,20 @@ underlying reason was that the database had **no `busy_timeout`**, so any
 concurrent writer failed instantly rather than waiting; that was silently losing
 execution records under any burst, not just this one.
 
-**Still to come:** per-rule debounce, which coalesces a burst into one execution.
-Not redundant with either of the above -- a rule can be correct, non-looping and
-still do ten times more work than it needs to.
+**Per-rule debounce landed too (FB-87)**, via `debounce_ms` in a rule's
+trigger_config -- JSON, so no schema change, which matters because `migrate()`
+forbids ALTER TABLE. It is trailing-edge: the rule waits for the events to stop
+and runs once on the last one. That is the opposite of cooldown, which runs on
+the *first* event and ignores the rest, and so acts on the state before the
+burst rather than the state the operator ended up in. The two compose -- the
+cooldown is checked when the debounced run fires, so a burst cannot consume a
+cooldown without the rule having executed.
+
+This is what grew the clock seam: debounce needs `AfterFunc`, and a debounce
+test that waited out real durations would be as slow and as flaky as the
+cooldown test the seam was created to fix. The fake clock now fires timers in
+deadline order when advanced, and does it after releasing its own lock, because
+a debounce callback asks the clock what time it is.
 
 **Numbering note:** the design plan assigned this ADR the number 012, on the
 assumption that 009–011 would be taken by earlier increments. 009 was already in

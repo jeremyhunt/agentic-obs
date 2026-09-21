@@ -103,6 +103,25 @@ func (r *Rule) GetEventType() string {
 	return ""
 }
 
+// GetDebounceMs returns the rule's debounce window in milliseconds, or 0.
+//
+// It lives in trigger_config rather than in a column because
+// internal/storage's migrate() re-runs every statement on every boot and so
+// forbids ALTER TABLE; trigger_config is already JSON, so a new key costs no
+// schema change. A value that has been through JSON arrives as float64, which
+// is why this is not a plain type assertion to int.
+func (r *Rule) GetDebounceMs() int {
+	switch v := r.TriggerConfig["debounce_ms"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	}
+	return 0
+}
+
 // GetEventFilter returns the event_filter from trigger config, or nil.
 func (r *Rule) GetEventFilter() map[string]interface{} {
 	if filter, ok := r.TriggerConfig["event_filter"].(map[string]interface{}); ok {

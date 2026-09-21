@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Per-rule debounce (FB-87)** — `debounce_ms` in a rule's `trigger_config`
+  makes it wait for the events to stop and then run once, on the last one.
+  Showing nine layers in a scene fires a `source_visibility_changed` rule nine
+  times in a few milliseconds; the rule wants to run once, at the end.
+
+  **It is the opposite of `cooldown_ms`, which is why both exist.** Cooldown runs
+  on the *first* event and ignores the rest for its window, so it acts on the
+  state before the burst; debounce acts on the state the operator ended up in.
+  They compose: the cooldown is checked when the debounced run actually fires, so
+  a burst cannot consume a rule's cooldown without the rule ever executing. A
+  debounced rule does not respond immediately by design, so it is wrong for
+  anything that must act now — a scene switch on `recording_started`, say — and
+  the help says so.
+
+  It lives in `trigger_config` rather than in a column because
+  `internal/storage`'s `migrate()` re-runs every statement on every boot and so
+  forbids `ALTER TABLE`. That config is already JSON, so a new key costs no schema
+  change.
+
+  This is what grew the clock seam. Debounce needs `AfterFunc`, and a debounce
+  test that waited out real durations would be as slow and as flaky as the
+  cooldown test the seam was built to fix (FB-37). The fake clock now schedules
+  timers, fires them in deadline order when advanced, and fires them **after**
+  releasing its own lock — a debounce callback asks the clock what time it is, so
+  firing under the lock would deadlock the normal path rather than an edge case.
+  Pending timers are cancelled when the engine stops, so one cannot fire into an
+  engine that has released its OBS client.
+
 ### Fixed
 - **A runaway rule is now disabled rather than left running (FB-86)** — the
   engine counts each rule's executions over a sliding second and switches off one

@@ -2275,11 +2275,33 @@ just as legible at 1280 and costs a quarter as much.`,
 - name (string, required): Unique name for the rule
 - description (string, optional): What the rule does
 - trigger_type (string, required): 'event', 'schedule', or 'manual'
-- trigger_config (object, required): For 'event', {event_type, event_filter}; for 'schedule', {schedule: "<cron>"}; for 'manual', {}
+- trigger_config (object, required): For 'event', {event_type, event_filter, debounce_ms}; for 'schedule', {schedule: "<cron>"}; for 'manual', {}
 - actions (array, required): Ordered list of {type, parameters, on_error}
 - cooldown_ms (int, optional): Minimum time between executions (default: 0)
 - priority (int, optional): Higher priority rules execute first (default: 0)
 - enabled (bool, optional): Whether the rule is active (default: true)
+
+**debounce_ms vs cooldown_ms** — they sound alike and do opposite things:
+
+- debounce_ms (inside trigger_config) waits for the events to *stop*, then
+  runs once on the last one. Showing nine layers in a scene fires a visibility
+  rule nine times in a few milliseconds; with debounce it runs once, against the
+  state the operator ended up in.
+- cooldown_ms (on the rule) runs on the *first* event and ignores the rest for
+  the window — so it acts on the state before the burst.
+
+Use debounce for "react once things settle", cooldown for "do not do this more
+than once a second". They compose: the cooldown is checked when the debounced
+run actually fires, so a burst cannot consume a cooldown without the rule having
+executed.
+
+A debounced rule does not respond immediately, by design. Do not debounce
+something that must act now, such as a scene switch on recording_started.
+
+**Loop protection**: the engine drops the event its own writes produce, so a
+rule that reacts to visibility by setting visibility no longer feeds itself. Any
+rule that still manages 20 executions in one second is disabled automatically,
+with error=oscillation against it in the execution history. See ADR-010.
 
 **Event types**: scene_changed, scene_created, scene_removed, recording_started,
 recording_stopped, recording_paused, recording_resumed, recording_file_changed,
