@@ -128,30 +128,6 @@ func Apply(ctx context.Context, client ApplyClient, spec *Spec, sceneName string
 	if spec == nil {
 		return nil, fmt.Errorf("no spec to apply")
 	}
-	if !opts.DryRun {
-		// A spec is caller-supplied and an apply writes the settings of every
-		// input it names, so a hand-authored spec naming the bridge's inbox is
-		// the scripting channel's payload by another route. A capture never
-		// produces one: the transport belongs to no scene, so nothing that
-		// reads a scene can see it.
-		//
-		// Refused whole rather than with that one source skipped. A partial
-		// apply reported as a success is its own defect -- the caller asked for
-		// a scene to match a document, and silently declining part of the
-		// document leaves a scene neither the spec nor the operator describes.
-		//
-		// Dry runs and diffs are left alone: they write nothing, and planning
-		// against a spec is how a caller finds out its spec is contaminated.
-		if name, found := bridgeTransportIn(spec); found {
-			return nil, fmt.Errorf(
-				"this spec names %q, which is the Lua bridge's transport: applying it would write that "+
-					"source's settings, and a settings write there runs code inside the OBS process. The "+
-					"whole apply is refused rather than that one source skipped, so nothing lands that "+
-					"the spec did not describe. Take it out of the spec, or re-run with dry_run to see "+
-					"what the rest would do",
-				name)
-		}
-	}
 	if len(spec.Omitted) > 0 {
 		// A spec captured without settings describes a layout, not a scene.
 		// Applying it would write empty settings over every source in it.
@@ -172,6 +148,37 @@ func Apply(ctx context.Context, client ApplyClient, spec *Spec, sceneName string
 	mask, err := newFieldMask(opts.Fields)
 	if err != nil {
 		return nil, err
+	}
+
+	// A spec is caller-supplied and an apply writes the settings of every input
+	// it names, so a hand-authored spec naming the bridge's inbox is the
+	// scripting channel's payload by another route. A capture does not produce
+	// one unless somebody placed the transport in a scene by hand, which the
+	// reservation now refuses everywhere it can be asked for.
+	//
+	// Refused whole rather than with that one source skipped. A partial apply
+	// reported as a success is its own defect -- the caller asked for a scene
+	// to match a document, and silently declining part of the document leaves a
+	// scene neither the spec nor the operator describes.
+	//
+	// Gated on what this apply can actually do, not on the spec alone. A dry
+	// run writes nothing, and planning against a spec is how a caller finds out
+	// a stored one is contaminated. Nor is a mask that cannot reach a source a
+	// hazard: apply_scene_preset passes fields=["enabled"], under which the
+	// only write available is SetSceneItemEnabled on a placement OBS already
+	// holds -- so refusing it would make a scene containing the transport
+	// un-appliable for nothing. See fieldMask.writesSources.
+	if !opts.DryRun && mask.writesSources() {
+		if name, found := bridgeTransportIn(spec); found {
+			return nil, fmt.Errorf(
+				"this spec names %q, which is the Lua bridge's transport: applying it could write that "+
+					"source's settings, and a settings write there runs code inside the OBS process. The "+
+					"whole apply is refused rather than that one source skipped, so nothing lands that "+
+					"the spec did not describe. Take it out of the spec, re-run with dry_run to see what "+
+					"the rest would do, or restrict fields to placement state (enabled, locked, "+
+					"transform, order), which cannot reach a source at all",
+				name)
+		}
 	}
 
 	before, err := CaptureWith(client, sceneName, FullCapture())

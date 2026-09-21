@@ -570,6 +570,52 @@ func TestApplyRefusesTheWholeSpecRatherThanSkippingTheTransport(t *testing.T) {
 	}
 }
 
+func TestApplyRefusesTheTransportOnlyWhenItCouldReachASource(t *testing.T) {
+	// The refusal is gated on what the mask lets this apply do, not on the spec
+	// alone. Four aspects reach a source by name; the rest write through a
+	// scene item id, and refusing those would make a scene holding the
+	// transport un-appliable for no security gain -- which is exactly the
+	// fields=["enabled"] that apply_scene_preset passes.
+	reaches := []string{
+		scenespec.FieldSource, scenespec.FieldPlacement,
+		scenespec.FieldSettings, scenespec.FieldFilters,
+	}
+	cannot := []string{
+		scenespec.FieldEnabled, scenespec.FieldLocked, scenespec.FieldTransform,
+		scenespec.FieldBlendMode, scenespec.FieldOrder, scenespec.FieldKind,
+	}
+
+	for _, field := range reaches {
+		f, scene := fixture(t)
+		spec := withBridgeInbox(t, f, scene)
+
+		if _, err := scenespec.Apply(context.Background(), f, spec, scene,
+			scenespec.ApplyOptions{DryRun: false, Fields: []string{field}}); err == nil {
+			t.Errorf("fields=[%s] can reach a source and was allowed to name the transport", field)
+		}
+	}
+
+	for _, field := range cannot {
+		f, scene := fixture(t)
+		spec := withBridgeInbox(t, f, scene)
+
+		if _, err := scenespec.Apply(context.Background(), f, spec, scene,
+			scenespec.ApplyOptions{DryRun: false, Fields: []string{field}}); err != nil {
+			t.Errorf("fields=[%s] writes through a scene item id and cannot reach a source, "+
+				"so naming the transport should not be refused: %v", field, err)
+		}
+
+		// And having been allowed, it must still not have written the chunk.
+		settings, err := f.GetSourceSettings(obs.BridgeInboxSource)
+		if err != nil {
+			t.Fatalf("GetSourceSettings: %v", err)
+		}
+		if _, wrote := settings["lua"]; wrote {
+			t.Errorf("fields=[%s] wrote the inbox's settings after all", field)
+		}
+	}
+}
+
 func TestApplyDryRunMayStillPlanAgainstTheTransport(t *testing.T) {
 	// Deliberately open, and stated here so it is a decision rather than a gap.
 	// A dry run writes nothing, and planning is how a caller discovers that a

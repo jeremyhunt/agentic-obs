@@ -77,6 +77,25 @@ func (m fieldMask) covers(field string) bool {
 	return m[field]
 }
 
+// writesSources reports whether an apply under this mask can reach a SOURCE, as
+// opposed to only restating the state of a placement that already exists.
+//
+// Four aspects can, and they are the four write paths in apply.go that take a
+// source name rather than a scene item id: FieldSource gates ensureSources and
+// its CreateInput, FieldPlacement gates ensurePlacements' CreateSceneItem and
+// prune's RemoveSceneItem, FieldSettings is what lets a settings finding reach
+// applySettings, and FieldFilters is what lets a filter finding reach
+// applyFilters.
+//
+// The rest -- transform, enabled, locked, blend_mode, order, kind -- write
+// through a scene item id or write nothing at all. fields=["enabled"] is the
+// case that matters: it is what apply_scene_preset passes, and under it an
+// apply can only toggle the visibility of a placement OBS already holds.
+func (m fieldMask) writesSources() bool {
+	return m.covers(FieldSource) || m.covers(FieldPlacement) ||
+		m.covers(FieldSettings) || m.covers(FieldFilters)
+}
+
 // fieldOf reduces a finding to the aspect it belongs to.
 //
 // Findings name a specific thing -- "settings.url", "filter.Soft haze.opacity",
