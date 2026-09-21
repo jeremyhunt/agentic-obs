@@ -45,6 +45,17 @@ type InputPropertyInput struct {
 func (s *Server) handleSetSourceSettings(ctx context.Context, request *mcpsdk.CallToolRequest, input SetSourceSettingsInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
 
+	// The bridge's transport is addressed by name, so this tool -- always on,
+	// never elicited -- would otherwise be a second, ungated way to run Lua
+	// inside OBS. See bridge_reserved.go.
+	if isBridgeTransport(input.SourceName) {
+		err := errBridgeTransportWrite("set_source_settings", input.SourceName)
+		// Recorded as a failure: an attempt to write the transport is worth
+		// having in the history whether or not it succeeded.
+		s.recordAction("set_source_settings", "Set source settings", input, nil, false, time.Since(start))
+		return nil, nil, err
+	}
+
 	// Absent means merge. A caller changing one field should not have to know
 	// every other field to avoid clearing it.
 	overlay := true

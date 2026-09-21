@@ -157,6 +157,12 @@ func (s *Server) ensureInput(input EnsureInputInput, exists bool) (string, int, 
 }
 
 func (s *Server) applySettings(input EnsureInputInput) error {
+	// The second general-purpose path to a settings write, and therefore the
+	// second way to reach the bridge's inbox by name. See bridge_reserved.go.
+	if isBridgeTransport(input.SourceName) {
+		return errBridgeTransportWrite("ensure_input", input.SourceName)
+	}
+
 	overlay := true
 	if input.Overlay != nil {
 		overlay = *input.Overlay

@@ -2618,6 +2618,14 @@ func (s *Server) handleSetSourceLocked(ctx context.Context, request *mcpsdk.Call
 func (s *Server) handleDuplicateSource(ctx context.Context, request *mcpsdk.CallToolRequest, input DuplicateSourceInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
 
+	// The bridge's transport is reserved. Only the by-name path is checked:
+	// a scene_item_id names a placement, and the transport sources belong to
+	// no scene. See bridge_reserved.go.
+	if isBridgeTransport(input.SourceName) {
+		s.recordAction("duplicate_source", "Duplicate source", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportChange("duplicate_source", input.SourceName)
+	}
+
 	// Accept either the id or the source name. (FB-70)
 	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
 	if err != nil {
@@ -2650,6 +2658,14 @@ func (s *Server) handleDuplicateSource(ctx context.Context, request *mcpsdk.Call
 // handleRemoveSource removes a source from a scene
 func (s *Server) handleRemoveSource(ctx context.Context, request *mcpsdk.CallToolRequest, input RemoveSourceInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
+
+	// The bridge's transport is reserved. Only the by-name path is checked:
+	// a scene_item_id names a placement, and the transport sources belong to
+	// no scene. See bridge_reserved.go.
+	if isBridgeTransport(input.SourceName) {
+		s.recordAction("remove_source", "Remove source", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportChange("remove_source", input.SourceName)
+	}
 
 	// Accept either the id or the source name. (FB-70)
 	sceneItemID, err := s.resolveSceneItemID(input.SceneName, input.SceneItemID, input.SourceName)
