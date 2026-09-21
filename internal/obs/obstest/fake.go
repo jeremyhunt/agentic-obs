@@ -158,7 +158,12 @@ func (f *Fake) CreateInput(sceneName, sourceName, inputKind string, settings map
 		return 0, fmt.Errorf("resource already exists: an input named %q already exists", sourceName)
 	}
 
-	f.world.inputs[sourceName] = &input{name: sourceName, kind: inputKind, settings: settings}
+	// Copied, not kept: OBS receives settings as JSON over a socket and cannot
+	// share a map with the caller. Storing the caller's map let an edit made
+	// after the call change the source with no write, which is the kind of
+	// difference between a double and the real thing that makes a test pass for
+	// a reason unrelated to what it claims.
+	f.world.inputs[sourceName] = &input{name: sourceName, kind: inputKind, settings: copySettings(settings)}
 
 	f.world.nextID++
 	it := newSceneItem(f.world.nextID, sourceName, true)

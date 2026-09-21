@@ -102,6 +102,20 @@ type SourceSpec struct {
 	// Settings is the source's own configuration. Inputs only.
 	Settings map[string]interface{} `json:"settings,omitempty"`
 
+	// PreserveURLParams names query parameters of Settings["url"] that belong
+	// to somebody else and must survive a write.
+	//
+	// A browser source's URL can have two writers. The "Starting Soon" overlay
+	// here is the case: this spec owns the page and its geometry, and the
+	// streaming dashboard owns "text" and "until". Settings are applied with
+	// overlay=false so the live source matches the document, which is right for
+	// every key the document owns and is exactly what drops a key it does not.
+	// Naming those keys makes a diff ignore them and an apply carry them over.
+	//
+	// A capture never fills this in: only the author knows which parameters are
+	// foreign, and guessing would be worse than asking.
+	PreserveURLParams []string `json:"preserve_url_params,omitempty"`
+
 	// Filters hang off the source, not off a placement, so a filter added while
 	// a source sits in one scene is visible from every scene showing it. All
 	// three source types carry them: a scene and a group are both obs_source_t.

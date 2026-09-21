@@ -442,10 +442,22 @@ func (r *applyRun) applySettings(source SourceSpec, differs bool) {
 		r.record("settings", source.Name, OpUpdated, "would write the spec's settings")
 		return
 	}
+	settings := source.Settings
+	if len(source.PreserveURLParams) > 0 {
+		// The one read this costs happens only for a source that declares the
+		// field, and only on an apply that is actually going to write.
+		live, err := r.client.GetSourceSettings(source.Name)
+		if err != nil {
+			r.record("settings", source.Name, OpFailed, err.Error())
+			return
+		}
+		settings = PreserveURLParams(settings, live, source.PreserveURLParams)
+	}
+
 	// overlay=false: the live object is made to match the spec rather than
 	// merged with it, so a key the spec dropped goes back to its default
 	// instead of lingering, and a second apply has nothing to do.
-	if err := r.client.SetSourceSettings(source.Name, source.Settings, false); err != nil {
+	if err := r.client.SetSourceSettings(source.Name, settings, false); err != nil {
 		r.record("settings", source.Name, OpFailed, err.Error())
 		return
 	}

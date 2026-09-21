@@ -857,6 +857,30 @@ func RunContract(t *testing.T, newClient NewClient) {
 			t.Error("height survived an overlay=false write; that write replaces, it does not merge")
 		}
 	})
+	t.Run("a created input's settings are a copy, not the caller's map", func(t *testing.T) {
+		client, fx := newClient(t)
+
+		// OBS receives settings as JSON over a socket, so it cannot share a map
+		// with the caller even in principle. A double that stores the map it was
+		// handed behaves identically right up until the caller edits that map
+		// afterwards -- and then the source appears to change with no write,
+		// which is indistinguishable from a real one and sends you looking in
+		// the wrong place. It also makes any test that reuses the map vacuous,
+		// which is how this row came to exist.
+		settings := map[string]interface{}{"width": 640.0}
+		if _, err := client.CreateInput(fx.SceneName, "contract-settings-copy", fx.SourceKind, settings); err != nil {
+			t.Fatalf("CreateInput: %v", err)
+		}
+		settings["width"] = 1280.0
+
+		got, err := client.GetSourceSettings("contract-settings-copy")
+		if err != nil {
+			t.Fatalf("GetSourceSettings: %v", err)
+		}
+		if got["width"] == 1280.0 {
+			t.Error("editing the caller's map after CreateInput changed the source; the settings were stored by reference")
+		}
+	})
 	t.Run("default settings are reported per input kind", func(t *testing.T) {
 		client, fx := newClient(t)
 
