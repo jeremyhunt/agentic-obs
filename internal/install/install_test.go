@@ -153,3 +153,46 @@ func TestRemoveTakesTheScriptBackOut(t *testing.T) {
 		t.Error("the script is still registered after a remove")
 	}
 }
+
+// Self-review finding: on --all, Backup(path) ran before AddScript/RemoveScript
+// for every collection in the loop. If the edit then failed (as it does here,
+// on a scripts-tool that is not an array), the loop returned immediately and
+// left that collection's backup sitting on disk without ever recording it in
+// report.Backups -- litter that grows on every retry of a broken collection.
+func TestInstallDoesNotOrphanABackupWhenAnEditFails(t *testing.T) {
+	scenes := t.TempDir()
+	good := filepath.Join(scenes, "AAA_Good.json")
+	bad := filepath.Join(scenes, "ZZZ_Bad.json")
+	if err := os.WriteFile(good, []byte(`{"name":"Good"}`), 0o644); err != nil {
+		t.Fatalf("write good: %v", err)
+	}
+	// modules.scripts-tool is a string here, not an array, which AddScript
+	// rejects rather than silently discarding (see collections_test.go).
+	if err := os.WriteFile(bad, []byte(`{"name":"Bad","modules":{"scripts-tool":"not an array"}}`), 0o644); err != nil {
+		t.Fatalf("write bad: %v", err)
+	}
+
+	// findCollections sorts, so Good is processed before Bad -- the run gets
+	// partway through before the failure, which is the scenario that matters.
+	report, err := installInto(scenes, t.TempDir(), Options{All: true})
+	if err == nil {
+		t.Fatal("installInto succeeded despite a non-array scripts-tool")
+	}
+
+	if len(report.Changed) != 1 || report.Changed[0] != good {
+		t.Fatalf("report.Changed = %v, want just [%s]", report.Changed, good)
+	}
+	if len(report.Backups) != 1 {
+		t.Fatalf("report.Backups = %v, want exactly 1 (Good's)", report.Backups)
+	}
+
+	entries, err := os.ReadDir(scenes)
+	if err != nil {
+		t.Fatalf("read scenes dir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "ZZZ_Bad.json.bak-") {
+			t.Errorf("Bad's failed edit left an orphaned backup: %s", entry.Name())
+		}
+	}
+}

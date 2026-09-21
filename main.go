@@ -402,15 +402,15 @@ func runBridgeInstall(args []string, remove bool) int {
 		DryRun:     *dryRun,
 		Remove:     remove,
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
-		return 1
-	}
 
+	// Print whatever the report holds before checking err: on --all, a
+	// failure partway through (e.g. one bad collection among many) must not
+	// hide which collections were already changed -- and backed up -- before
+	// it happened.
 	if *dryRun {
 		fmt.Println("Dry run. Nothing was written.")
 	}
-	if !remove {
+	if !remove && report.ScriptPath != "" {
 		fmt.Printf("Bridge script: %s\n", report.ScriptPath)
 	}
 	for _, path := range report.Changed {
@@ -419,6 +419,12 @@ func runBridgeInstall(args []string, remove bool) int {
 	for _, path := range report.Skipped {
 		fmt.Printf("  no change %s\n", path)
 	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		return 1
+	}
+
 	if len(report.Changed) > 0 && !*dryRun {
 		fmt.Println("\nStart OBS (or switch scene collections) to load the bridge.")
 	}

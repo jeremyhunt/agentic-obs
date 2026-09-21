@@ -171,6 +171,12 @@ func installInto(scenesDir, scriptDir string, opts Options) (Report, error) {
 			changed, err = AddScript(path, scriptPath)
 		}
 		if err != nil {
+			// AddScript/RemoveScript made no write (confirmed by
+			// TestAddScriptRejectsNonArrayScriptsTool), so path itself is
+			// untouched -- but the backup just above already landed on disk.
+			// Without this, a failed edit leaves an orphaned backup that
+			// report.Backups never mentions.
+			_ = os.Remove(backup)
 			return report, err
 		}
 
