@@ -70,6 +70,21 @@ For cross-platform builds, release automation, and advanced build options, see [
 4. Set a password (optional but recommended)
 5. Note your connection details
 
+### Install the bridge
+
+Some capabilities need code running inside OBS. Close OBS, then:
+
+```bash
+agentic-obs install-bridge --all
+```
+
+This writes the bridge script and registers it with every scene collection,
+backing each one up first. Scene collections store their own script list, so a
+collection installed later needs another run. `--dry-run` shows what would
+change; `uninstall-bridge` takes it back out.
+
+`get_obs_status` reports whether the bridge is currently loaded.
+
 ## Usage
 
 ### Running the Server

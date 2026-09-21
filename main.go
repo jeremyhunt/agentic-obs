@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ironystock/agentic-obs/config"
+	"github.com/ironystock/agentic-obs/internal/install"
 	"github.com/ironystock/agentic-obs/internal/mcp"
 	"github.com/ironystock/agentic-obs/internal/storage"
 	"github.com/ironystock/agentic-obs/internal/tui"
@@ -19,6 +20,17 @@ import (
 const appName = "agentic-obs"
 
 func main() {
+	// Subcommands are checked before flags so that `agentic-obs install-bridge`
+	// does not fall through to the server's flag set.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "install-bridge":
+			os.Exit(runBridgeInstall(os.Args[2:], false))
+		case "uninstall-bridge":
+			os.Exit(runBridgeInstall(os.Args[2:], true))
+		}
+	}
+
 	// Parse command-line flags
 	tuiMode := flag.Bool("tui", false, "Run in TUI dashboard mode instead of MCP server mode")
 	flag.BoolVar(tuiMode, "t", false, "Run in TUI dashboard mode (shorthand)")
@@ -358,4 +370,57 @@ func toolGroupsFromConfig(c config.ToolGroupConfig) mcp.ToolGroupConfig {
 		Automation:            c.Automation,
 		AdvancedSceneSwitcher: c.AdvancedSceneSwitcher,
 	}
+}
+
+// runBridgeInstall implements install-bridge and uninstall-bridge, returning a
+// process exit code.
+func runBridgeInstall(args []string, remove bool) int {
+	name := "install-bridge"
+	if remove {
+		name = "uninstall-bridge"
+	}
+
+	flags := flag.NewFlagSet(name, flag.ExitOnError)
+	collection := flags.String("collection", "", "a single scene collection by name; omit with --all")
+	all := flags.Bool("all", false, "every scene collection")
+	dryRun := flags.Bool("dry-run", false, "report what would change, write nothing")
+	force := flags.Bool("force", false, "proceed even if OBS appears to be running")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+
+	// OBS rewrites the scene collection when it saves, so an edit made now
+	// would be discarded or raced.
+	if install.OBSIsRunning() && !*force && !*dryRun {
+		fmt.Fprintln(os.Stderr, "OBS is running. Close it first, or pass --force if you are certain it is not.")
+		return 1
+	}
+
+	report, err := install.Run(install.Options{
+		Collection: *collection,
+		All:        *all,
+		DryRun:     *dryRun,
+		Remove:     remove,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		return 1
+	}
+
+	if *dryRun {
+		fmt.Println("Dry run. Nothing was written.")
+	}
+	if !remove {
+		fmt.Printf("Bridge script: %s\n", report.ScriptPath)
+	}
+	for _, path := range report.Changed {
+		fmt.Printf("  changed  %s\n", path)
+	}
+	for _, path := range report.Skipped {
+		fmt.Printf("  no change %s\n", path)
+	}
+	if len(report.Changed) > 0 && !*dryRun {
+		fmt.Println("\nStart OBS (or switch scene collections) to load the bridge.")
+	}
+	return 0
 }

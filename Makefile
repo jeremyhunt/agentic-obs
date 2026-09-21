@@ -25,9 +25,21 @@ LDFLAGS = -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.
 .PHONY: all
 all: test build
 
+## sync-bridge: copy the bridge script into the install package for go:embed
+##
+## go:embed cannot climb out of its own package, so internal/install/assets
+## (gitignored) is populated here rather than holding a second copy of the
+## script by hand. build and test depend on this so internal/install compiles;
+## it is not wired into every target (build-windows, vet, test-live, ...), so
+## invoke it by hand first when using one of those directly.
+.PHONY: sync-bridge
+sync-bridge:
+	@mkdir -p internal/install/assets
+	@cp bridge/agentic-obs-bridge.lua internal/install/assets/agentic-obs-bridge.lua
+
 # Build the binary
 .PHONY: build
-build:
+build: sync-bridge
 	$(GOBUILD) $(LDFLAGS) -o $(BINARY_NAME) .
 
 # Build for Windows specifically
@@ -47,7 +59,7 @@ build-all:
 
 # Run tests
 .PHONY: test
-test:
+test: sync-bridge
 	$(GOTEST) -v ./...
 
 # Run tests with coverage
