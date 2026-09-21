@@ -81,9 +81,21 @@ chunk returns.
         them into the source is how a scene name becomes code.
 
 The chunk runs sandboxed: obslua is available; os, io, package, debug and the
-loadstring/setfenv family are not. It is capped at 2,000,000 instructions.
+loadstring/setfenv family are not.
 
-It runs on OBS's render thread, so a slow chunk drops frames.`
+What comes back:
+
+  * Only the FIRST return value. The chunk is run through pcall and only its
+    first result is read, so ` + "`return a, b`" + ` loses b. Return a table instead.
+  * A Lua array arrives as an object. Every key is stringified on the way out,
+    so ` + "`return {10, 20}`" + ` comes back as {"1": 10, "2": 20}, not a list.
+  * Limits are failures, never truncation: deeper than 8 levels, or over 64 KB
+    (keys counted too), comes back ok=false -- as does a function or userdata.
+
+It runs on OBS's render thread, so a slow chunk drops frames. A chunk is
+interrupted after 2,000,000 instructions, which stops an ordinary runaway loop
+-- but a loop inside the chunk's own pcall catches that interruption and keeps
+running, and OBS stays wedged until someone closes it.`
 
 func registerScriptingChannel(s *Server) {
 	if !scriptingEnabled() {

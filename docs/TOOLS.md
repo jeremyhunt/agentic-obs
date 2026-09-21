@@ -1704,7 +1704,17 @@ For detailed documentation on use cases and best practices, see [SCREENSHOTS.md]
   "fps": 59.94,
   "frame_time_ms": 16.68,
   "frames": 324000,
-  "dropped_frames": 42
+  "dropped_frames": 42,
+  "video": {
+    "base_width": 2560,
+    "base_height": 1440,
+    "output_width": 1920,
+    "output_height": 1080,
+    "fps_numerator": 60000,
+    "fps_denominator": 1001
+  },
+  "supported_image_formats": ["png", "jpg", "jpeg", "bmp"],
+  "bridge": { "present": true, "version": "1" }
 }
 ```
 
@@ -1719,6 +1729,21 @@ For detailed documentation on use cases and best practices, see [SCREENSHOTS.md]
 - `frame_time_ms` (float): Average frame render time in milliseconds
 - `frames` (integer): Total output frames
 - `dropped_frames` (integer): Total dropped/skipped frames
+- `video` (object, omitted if unreadable): the canvas every layout decision
+  starts from. `base_width`/`base_height` are the coordinate space scene item
+  transforms live in; `output_width`/`output_height` are what OBS encodes after
+  any downscale, and are **not** the coordinate space. Frame rate is a fraction
+  because 59.94 is 60000/1001.
+- `supported_image_formats` (array of string, omitted if unreadable): the
+  formats this OBS build can write for a screenshot. It comes from Qt's image
+  writers and varies by build, so it is reported rather than assumed.
+- `bridge` (object): whether the Lua bridge is loaded **right now**, from a live
+  round trip (cached for 5 s). `present` (boolean); `version` (string, the
+  bridge's protocol version, when present); `detail` (string, why it is not
+  present — including `"bridge not configured"` when this build has no
+  transport). Scripts are stored per scene collection, so switching collections
+  unloads the bridge with no warning; this is reported rather than assumed for
+  that reason.
 
 **Use Cases:**
 - Health monitoring dashboards
@@ -2993,6 +3018,35 @@ OBS process, on the render thread, through the bridge.
 | `args` | object | Data the chunk reads as `args`. Pass parameters here; never build them into `lua`. |
 
 The chunk runs in a sandbox: `obslua` is available, `os`, `io`, `package`,
-`debug` and the `loadstring`/`setfenv` family are not. It is bounded at
-2,000,000 instructions so a runaway loop cannot hang OBS. Every call asks for
+`debug` and the `loadstring`/`setfenv` family are not. Every call asks for
 confirmation and the full source is written to action history.
+
+**The instruction budget is not a hard bound.** A chunk is interrupted after
+2,000,000 instructions, which stops an *ordinary* runaway loop — but a chunk
+whose loop sits inside its own `pcall` catches that interruption like any other
+error, the hook re-arms, and the loop continues with no upper bound while OBS's
+render thread stays wedged. Lua 5.1 gives a hook no way to raise an error a
+script-level `pcall` cannot catch. The 2-second transport timeout then lets
+agentic-obs report the failure; it does not free OBS. Recovering from that needs
+a human to close OBS.
+
+### What comes back
+
+- **Only the first return value.** The chunk is run through `pcall`, and only
+  its first result is read. `return a, b` silently loses `b` — return a table
+  instead.
+- **A Lua array comes back as an object.** Every table key is stringified on the
+  way out, so `return {10, 20}` arrives as `{"1": 10, "2": 20}`, not a list.
+  Expect an object with `"1"`-based string keys wherever a chunk returns a
+  sequence.
+- **Limits are failures, not truncation.** A result nested deeper than 8 levels,
+  or larger than 64 KB (keys counted as well as values), comes back `ok: false`.
+  So does a function, userdata or thread: it is refused rather than stringified.
+
+### The transport is reserved
+
+The bridge's two sources, `agentic-obs-inbox` and `agentic-obs-mailbox`, are
+refused by `set_source_settings`, `ensure_input`, `remove_source` and
+`duplicate_source` in every build. Writing the first is running Lua; removing
+either breaks the bridge. Reads are unaffected. Use `agentic-obs
+uninstall-bridge` to take the bridge out.
