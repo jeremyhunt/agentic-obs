@@ -1,17 +1,15 @@
 package install
 
 import (
-	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
-)
 
-//go:embed all:assets
-var assets embed.FS
+	bridgescript "github.com/ironystock/agentic-obs/bridge"
+)
 
 // scriptName is the file written to disk and registered with OBS.
 const scriptName = "agentic-obs-bridge.lua"
@@ -100,17 +98,17 @@ func Run(opts Options) (Report, error) {
 
 // writeScript drops the embedded bridge into dir, replacing any older copy so
 // that an upgrade is just a re-run.
+//
+// bridgescript.Script is compiled in, so unlike a file read there is no "the
+// asset is missing" failure mode to handle here -- if it were missing, this
+// package would not have built.
 func writeScript(dir string) (string, error) {
-	body, err := assets.ReadFile("assets/" + scriptName)
-	if err != nil {
-		return "", fmt.Errorf("the bridge script is missing from this build: %w", err)
-	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("could not create %s: %w", dir, err)
 	}
 
 	path := filepath.Join(dir, scriptName)
-	if err := os.WriteFile(path, body, 0o644); err != nil {
+	if err := os.WriteFile(path, bridgescript.Script, 0o644); err != nil {
 		return "", fmt.Errorf("could not write %s: %w", path, err)
 	}
 	return path, nil
