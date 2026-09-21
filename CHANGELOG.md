@@ -4,7 +4,44 @@ All notable changes to agentic-obs are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
 ### Fixed
+- **A runaway rule is now disabled rather than left running (FB-86)** — the
+  engine counts each rule's executions over a sliding second and switches off one
+  that crosses twenty, recording `error=oscillation` against it and saying so in
+  the log. Suppression (FB-85) removes the loops it can identify, and it
+  identifies most; it cannot identify all. A rule whose action is
+  `trigger_hotkey` is the clean example — the engine hands OBS a name and cannot
+  know what it does, so whatever comes back has no entry waiting for it. The
+  breaker does not need to know why a rule is running away, only that it is.
+
+  The threshold sits three orders of magnitude above the measured loop, so
+  "broken" and "busy" are not close: a rule firing nineteen times a second
+  indefinitely is left alone, because disabling a working setup is worse than the
+  loop — the operator did nothing wrong. Counts are per rule, so one runaway does
+  not take out the others, and a rule's history is dropped when it is disabled so
+  that re-enabling it starts clean instead of tripping immediately.
+
+  **The first version did not work, and the reason is worth keeping.** It wrote
+  the disable and the oscillation row to SQLite *before* flipping the rule off in
+  memory — which reads as the tidier order, persist then reflect. But a runaway
+  rule has already saturated that same file with its own execution rows, so every
+  recovery write came back `SQLITE_BUSY` and the rule stayed enabled. **The
+  breaker was trying to record that it had tripped using the resource the rule it
+  was stopping had saturated.** It now stops the loop in memory first, which
+  needs nothing that can be contended, and writes afterwards against a quiet
+  database.
+
+- **The database had no `busy_timeout`, and was silently losing writes
+  (FB-86)** — WAL lets readers run alongside a writer, but writers still
+  serialise, and without a timeout the second one fails immediately instead of
+  waiting its turn. With ten pooled connections and an engine that runs several
+  rules at once, **execution records were being dropped under any burst** — which
+  is exactly when the record matters. Found while chasing the breaker failure
+  above, but not specific to it: any concurrent rule activity hit this. Now set
+  to five seconds.
+
 - **A rule that reacts to what it does no longer feeds itself (FB-85)** — the
   engine reacts to OBS events and writes to OBS, and OBS announces every write as
   an event, so a rule triggering on `source_visibility_changed` with a
