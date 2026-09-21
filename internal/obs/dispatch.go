@@ -172,21 +172,194 @@ var deniedRequests = map[string]string{
 	"RemoveProfile":             "",
 }
 
-func checkRequestAllowed(requestType string) error {
-	wrapper, denied := deniedRequests[requestType]
-	if !denied {
+// checkRequestAllowed decides whether one passthrough call may go out.
+//
+// Two rules, and they are keyed on different things. deniedRequests keys on the
+// request TYPE, which is enough for a destructive act whose whole identity is
+// its verb. The bridge's transport is not that: SetInputSettings is exactly the
+// request set_source_settings wraps and denying it wholesale would cost the
+// passthrough a legitimate use, so the second rule keys on the TARGET instead.
+//
+// transportUUIDs resolves the reserved names to the uuids OBS currently holds
+// for them. It is a function rather than a value because it costs a round trip
+// and is only ever needed for the rare payload that addresses a source by uuid;
+// it is not called at all otherwise.
+func checkRequestAllowed(requestType string, requestData map[string]interface{}, transportUUIDs func() (map[string]string, error)) error {
+	if wrapper, denied := deniedRequests[requestType]; denied {
+		if wrapper == "" {
+			return fmt.Errorf(
+				"%s is not available through call_obs_request: it rebuilds or discards "+
+					"state that cannot be recovered from here, so it is left to the operator",
+				requestType)
+		}
+		return fmt.Errorf(
+			"%s is not available through call_obs_request: use the %s tool, which confirms "+
+				"before removing",
+			requestType, wrapper)
+	}
+	return checkBridgeTransportTarget(requestType, requestData, transportUUIDs)
+}
+
+// checkBridgeTransportTarget refuses a request that aims at the Lua bridge's
+// transport.
+//
+// The requirement is that no call_obs_request may write, create, rename, remove
+// or place a reserved transport source. Reads stay open, and "read" is decided
+// structurally rather than from a table: obs-websocket names every read Get*
+// and nothing else, so a request that is not a Get* is treated as a write. The
+// failure direction is deliberate -- a request this build has never seen falls
+// on the refusing side.
+//
+// What is checked is every source-addressing value in the payload, found by the
+// shape of the key rather than by a list of the three field names that matter
+// today (inputName, newInputName, sourceName). Scanning every string value
+// instead would refuse SetInputSettings on a text source whose text happens to
+// be "agentic-obs-inbox"; keying on *Name/*Uuid refuses nothing a caller would
+// plausibly send, and covers sceneName, newInputName, destinationSceneName and
+// whatever the next OBS release adds without this function being edited.
+//
+// This closes addressing the transport through this tool. It is not a boundary
+// against whoever holds the obs-websocket password, who can issue the same
+// request directly.
+func checkBridgeTransportTarget(requestType string, requestData map[string]interface{}, transportUUIDs func() (map[string]string, error)) error {
+	if len(requestData) == 0 || strings.HasPrefix(requestType, "Get") {
 		return nil
 	}
-	if wrapper == "" {
-		return fmt.Errorf(
-			"%s is not available through call_obs_request: it rebuilds or discards "+
-				"state that cannot be recovered from here, so it is left to the operator",
-			requestType)
+
+	refs := sourceRefsIn(requestData)
+
+	// Names first: they need no round trip, and they are how a caller would
+	// actually reach the transport.
+	for _, ref := range refs {
+		if !ref.uuid && IsBridgeTransport(ref.value) {
+			return errBridgeTransportRequest(requestType, ref.field, ref.value)
+		}
 	}
+
+	// A uuid is the bypass a name-only guard leaves open: GetInputList is a
+	// read, it stays open, and it hands back the inbox's inputUuid. So the
+	// names are resolved to whatever uuids OBS holds for them right now.
+	// Resolving on demand rather than caching keeps this correct across a
+	// bridge reinstall, which gives the sources new uuids.
+	wanted := false
+	for _, ref := range refs {
+		if ref.uuid {
+			wanted = true
+			break
+		}
+	}
+	if !wanted {
+		return nil
+	}
+
+	byUUID, err := transportUUIDs()
+	if err != nil {
+		// Fail closed. Not knowing the transport's uuids means not knowing that
+		// this request misses them, and the request would almost certainly have
+		// failed anyway -- the lookup only fails when OBS is unreachable.
+		return fmt.Errorf(
+			"%s addresses a source by uuid and the Lua bridge's transport uuids could not be "+
+				"resolved to check it against them, so the request is refused rather than guessed: %w",
+			requestType, err)
+	}
+	for _, ref := range refs {
+		if !ref.uuid {
+			continue
+		}
+		if name, ok := byUUID[strings.ToLower(ref.value)]; ok {
+			return errBridgeTransportRequest(requestType, ref.field, name)
+		}
+	}
+	return nil
+}
+
+func errBridgeTransportRequest(requestType, field, name string) error {
 	return fmt.Errorf(
-		"%s is not available through call_obs_request: use the %s tool, which confirms "+
-			"before removing",
-		requestType, wrapper)
+		"%s is not available through call_obs_request with %s addressing %q: that is the Lua bridge's "+
+			"transport, and a request that writes it runs code inside the OBS process -- which is what "+
+			"the scripting channel's build tag, AGENTIC_OBS_SCRIPTING and per-call confirmation exist to "+
+			"gate -- while one that renames, removes or places it breaks the bridge with no error "+
+			"anywhere. Use run_lua_in_obs to run Lua in OBS, and 'agentic-obs uninstall-bridge' to take "+
+			"the bridge out. Get* requests against the transport are not refused",
+		requestType, field, name)
+}
+
+// sourceRef is one value in a request payload that addresses a source.
+type sourceRef struct {
+	// field is the payload key it came from, carried so a refusal can say
+	// which part of the request was the problem.
+	field string
+	value string
+	// uuid is true when the key addresses by uuid rather than by name.
+	uuid bool
+}
+
+// sourceRefsIn collects the payload values that address a source, by key shape.
+//
+// It descends into nested objects and arrays. Nothing in obs-websocket 5.x
+// addresses a source from inside a nested object today -- request payloads are
+// flat where addressing is concerned -- so this buys nothing against the
+// protocol as it stands and costs nothing either: a nested key would have to
+// both end in Name or Uuid and hold a reserved value to be caught.
+//
+// Results are sorted so a payload with two matching refs refuses with the same
+// message every time; Go's map iteration order is otherwise random.
+func sourceRefsIn(requestData map[string]interface{}) []sourceRef {
+	var refs []sourceRef
+
+	var walk func(m map[string]interface{})
+	walk = func(m map[string]interface{}) {
+		for key, value := range m {
+			switch typed := value.(type) {
+			case string:
+				lower := strings.ToLower(key)
+				switch {
+				case strings.HasSuffix(lower, "name"):
+					refs = append(refs, sourceRef{field: key, value: typed})
+				case strings.HasSuffix(lower, "uuid"):
+					refs = append(refs, sourceRef{field: key, value: typed, uuid: true})
+				}
+			case map[string]interface{}:
+				walk(typed)
+			case []interface{}:
+				for _, element := range typed {
+					if nested, ok := element.(map[string]interface{}); ok {
+						walk(nested)
+					}
+				}
+			}
+		}
+	}
+	walk(requestData)
+
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].field != refs[j].field {
+			return refs[i].field < refs[j].field
+		}
+		return refs[i].value < refs[j].value
+	})
+	return refs
+}
+
+// bridgeTransportUUIDs maps the uuid OBS currently holds for each reserved
+// transport source back to its name. Empty when the bridge is not installed.
+func (c *Client) bridgeTransportUUIDs() (map[string]string, error) {
+	inputs, err := c.ListSources()
+	if err != nil {
+		return nil, err
+	}
+
+	byUUID := map[string]string{}
+	for _, in := range inputs {
+		if in == nil || in.InputUuid == "" || !IsBridgeTransport(in.InputName) {
+			continue
+		}
+		// Lower-cased on both sides. OBS writes uuids lower-case and looks them
+		// up exactly, so a mixed-case uuid reaches nothing -- but matching it
+		// here errs towards refusing rather than towards missing.
+		byUUID[strings.ToLower(in.InputUuid)] = in.InputName
+	}
+	return byUUID, nil
 }
 
 // AvailableRequests lists every obs-websocket request this build can issue.
@@ -206,7 +379,7 @@ func (c *Client) CallRequest(requestType string, requestData map[string]interfac
 	if strings.TrimSpace(requestType) == "" {
 		return nil, fmt.Errorf("request_type is required")
 	}
-	if err := checkRequestAllowed(requestType); err != nil {
+	if err := checkRequestAllowed(requestType, requestData, c.bridgeTransportUUIDs); err != nil {
 		return nil, err
 	}
 

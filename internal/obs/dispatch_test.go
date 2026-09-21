@@ -1,6 +1,7 @@
 package obs
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -77,7 +78,7 @@ func TestDestructiveRequestsAreRefusedInFavourOfTheirWrappers(t *testing.T) {
 		"RemoveSceneItem":           "remove_scene_item",
 		"SetCurrentSceneCollection": "",
 	} {
-		err := checkRequestAllowed(request)
+		err := checkRequestAllowed(request, nil, noTransport)
 		if err == nil {
 			t.Errorf("%s was allowed through the passthrough", request)
 			continue
@@ -95,8 +96,264 @@ func TestOrdinaryRequestsAreNotRefused(t *testing.T) {
 		"GetStats", "GetVersion", "SetSceneItemTransform", "TriggerMediaInputAction",
 		"SetCurrentProgramScene", "CreateSceneItem", "SetInputSettings",
 	} {
-		if err := checkRequestAllowed(request); err != nil {
+		if err := checkRequestAllowed(request, nil, noTransport); err != nil {
 			t.Errorf("%s should be allowed: %v", request, err)
 		}
+	}
+}
+
+// The Lua bridge's transport is a pair of sources addressed by name, and
+// writing the inbox's settings runs the chunk they carry inside OBS. The
+// deny-list above cannot see that: it keys on the request type, and
+// SetInputSettings is the request set_source_settings wraps, so denying the
+// type would cost the passthrough a legitimate use and still leave CreateInput,
+// SetInputName and CreateSceneItem aimed at the same two names.
+//
+// These tests pin the target-based refusal. They fail against the deny-list
+// alone: before it existed, every call below returned nil.
+
+// noTransport stands in for "the bridge is not installed": no source carries a
+// reserved name, so no uuid resolves to one.
+func noTransport() (map[string]string, error) { return map[string]string{}, nil }
+
+func TestPassthroughRefusesRequestsAimedAtTheBridgeTransport(t *testing.T) {
+	for _, name := range []string{BridgeInboxSource, BridgeMailboxSource} {
+		for _, tc := range []struct {
+			request string
+			data    map[string]interface{}
+			why     string
+		}{
+			{
+				request: "SetInputSettings",
+				data: map[string]interface{}{
+					"inputName": name,
+					"inputSettings": map[string]interface{}{
+						"id": "1", "lua": "return 6 * 7",
+					},
+				},
+				why: "the write that runs the chunk",
+			},
+			{
+				request: "CreateInput",
+				data:    map[string]interface{}{"sceneName": "Game", "inputName": name, "inputKind": "color_source_v3"},
+				why:     "a decoy that collides with the real transport",
+			},
+			{
+				request: "SetInputName",
+				data:    map[string]interface{}{"inputName": name, "newInputName": "gone"},
+				why:     "renaming it breaks the bridge with no error anywhere",
+			},
+			{
+				request: "SetInputName",
+				data:    map[string]interface{}{"inputName": "Webcam", "newInputName": name},
+				why:     "renaming something else ONTO the reserved name",
+			},
+			{
+				request: "CreateSceneItem",
+				data:    map[string]interface{}{"sceneName": "Game", "sourceName": name},
+				why:     "placing it in a live scene",
+			},
+			{
+				request: "CreateSourceFilter",
+				data: map[string]interface{}{
+					"sourceName": name, "filterName": "f", "filterKind": "color_filter_v2",
+				},
+				why: "a write to the source by its other addressing field",
+			},
+			{
+				request: "PressInputPropertiesButton",
+				data:    map[string]interface{}{"inputName": name, "propertyName": "refresh"},
+				why:     "a request this guard was never written for, refused because it is not a Get*",
+			},
+		} {
+			err := checkRequestAllowed(tc.request, tc.data, noTransport)
+			if err == nil {
+				t.Errorf("%s aimed at %q was allowed through the passthrough (%s)", tc.request, name, tc.why)
+				continue
+			}
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("refusing %s should name %q, said: %v", tc.request, name, err)
+			}
+			if !strings.Contains(err.Error(), "run_lua_in_obs") {
+				t.Errorf("refusing %s should point at the gated tool, said: %v", tc.request, err)
+			}
+		}
+	}
+}
+
+func TestPassthroughStillReachesOrdinarySources(t *testing.T) {
+	// The guard has to be a target check, not a type check. Every one of these
+	// is the same request the tests above refuse, aimed somewhere ordinary.
+	for _, tc := range []struct {
+		request string
+		data    map[string]interface{}
+	}{
+		{"SetInputSettings", map[string]interface{}{
+			"inputName":     "Webcam",
+			"inputSettings": map[string]interface{}{"resolution": "1280x720"},
+		}},
+		{"CreateInput", map[string]interface{}{
+			"sceneName": "Game", "inputName": "agentic-obs-inbox-2", "inputKind": "color_source_v3",
+		}},
+		{"SetInputName", map[string]interface{}{"inputName": "Webcam", "newInputName": "Cam"}},
+		{"CreateSceneItem", map[string]interface{}{"sceneName": "Game", "sourceName": "Webcam"}},
+		{"SetCurrentProgramScene", map[string]interface{}{"sceneName": "Game"}},
+		{"TriggerMediaInputAction", map[string]interface{}{
+			"inputName": "Stinger", "mediaAction": "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART",
+		}},
+	} {
+		if err := checkRequestAllowed(tc.request, tc.data, noTransport); err != nil {
+			t.Errorf("%s should be allowed: %v", tc.request, err)
+		}
+	}
+}
+
+func TestPassthroughStillReadsTheBridgeTransport(t *testing.T) {
+	// Reads stay open, and "read" is decided by the Get* prefix rather than by
+	// a table. GetVersion with a nil payload is the call ADR-012's live
+	// coverage test makes through this same path.
+	for _, tc := range []struct {
+		request string
+		data    map[string]interface{}
+	}{
+		{"GetVersion", nil},
+		{"GetStats", map[string]interface{}{}},
+		{"GetInputSettings", map[string]interface{}{"inputName": BridgeInboxSource}},
+		{"GetSourceActive", map[string]interface{}{"sourceName": BridgeMailboxSource}},
+		{"GetInputList", map[string]interface{}{"inputKind": "color_source_v3"}},
+	} {
+		if err := checkRequestAllowed(tc.request, tc.data, noTransport); err != nil {
+			t.Errorf("read %s should be allowed: %v", tc.request, err)
+		}
+	}
+}
+
+func TestPassthroughIgnoresTheTransportNameAsContent(t *testing.T) {
+	// The precision boundary, stated as a test so it is a decision rather than
+	// an accident: the guard reads source-addressing keys, not every string in
+	// the payload. A text source whose text is the transport's name addresses
+	// nothing, and refusing it would be an absurd false positive.
+	for _, tc := range []struct {
+		request string
+		data    map[string]interface{}
+	}{
+		{"SetInputSettings", map[string]interface{}{
+			"inputName":     "Chat overlay",
+			"inputSettings": map[string]interface{}{"text": BridgeInboxSource},
+		}},
+		{"SetInputSettings", map[string]interface{}{
+			"inputName":     "Browser",
+			"inputSettings": map[string]interface{}{"url": "http://localhost/agentic-obs-inbox"},
+		}},
+	} {
+		if err := checkRequestAllowed(tc.request, tc.data, noTransport); err != nil {
+			t.Errorf("%s should be allowed: %v", tc.request, err)
+		}
+	}
+
+	// The breadth half of the same decision: a *Name key is checked wherever it
+	// sits, including inside a nested object, because that costs nothing.
+	err := checkRequestAllowed("SetInputSettings", map[string]interface{}{
+		"inputName": "Chat overlay",
+		"inputSettings": map[string]interface{}{
+			"target": map[string]interface{}{"sourceName": BridgeInboxSource},
+		},
+	}, noTransport)
+	if err == nil {
+		t.Error("a nested source-addressing key was not checked")
+	}
+}
+
+func TestPassthroughRefusesTheBridgeTransportAddressedByUUID(t *testing.T) {
+	// A name-only guard is one read away from being bypassed: GetInputList is a
+	// read, it stays open, and it hands back the inbox's inputUuid. So the
+	// reserved names are resolved to live uuids when -- and only when -- the
+	// payload carries one.
+	const inboxUUID = "9f1c2d33-4e55-4a6b-8c7d-0e1f2a3b4c5d"
+	resolved := func() (map[string]string, error) {
+		return map[string]string{inboxUUID: BridgeInboxSource}, nil
+	}
+
+	err := checkRequestAllowed("SetInputSettings", map[string]interface{}{
+		"inputUuid":     inboxUUID,
+		"inputSettings": map[string]interface{}{"id": "1", "lua": "return 6 * 7"},
+	}, resolved)
+	if err == nil {
+		t.Fatal("the transport was reachable by uuid")
+	}
+	if !strings.Contains(err.Error(), BridgeInboxSource) {
+		t.Errorf("a uuid refusal should name the source it resolved to, said: %v", err)
+	}
+
+	// Another source's uuid is not the transport's.
+	if err := checkRequestAllowed("SetInputSettings", map[string]interface{}{
+		"inputUuid":     "11111111-2222-3333-4444-555555555555",
+		"inputSettings": map[string]interface{}{"resolution": "1280x720"},
+	}, resolved); err != nil {
+		t.Errorf("an ordinary source addressed by uuid should be allowed: %v", err)
+	}
+}
+
+func TestPassthroughResolvesUUIDsOnlyWhenTheyAreUsed(t *testing.T) {
+	// The lookup is a round trip to OBS. A payload with no uuid in it must not
+	// pay for one, which is also what keeps the common path unchanged.
+	calls := 0
+	counting := func() (map[string]string, error) {
+		calls++
+		return map[string]string{}, nil
+	}
+
+	for _, tc := range []struct {
+		request string
+		data    map[string]interface{}
+	}{
+		{"SetInputSettings", map[string]interface{}{"inputName": "Webcam"}},
+		{"GetInputSettings", map[string]interface{}{"inputUuid": "irrelevant, this is a read"}},
+		{"SetCurrentProgramScene", map[string]interface{}{"sceneName": "Game"}},
+	} {
+		if err := checkRequestAllowed(tc.request, tc.data, counting); err != nil {
+			t.Errorf("%s should be allowed: %v", tc.request, err)
+		}
+	}
+	if calls != 0 {
+		t.Errorf("the transport uuids were resolved %d times for payloads that address nothing by uuid", calls)
+	}
+}
+
+func TestCallRequestChecksTheTargetBeforeItTouchesOBS(t *testing.T) {
+	// Through the exported entry point rather than the helper, and on a client
+	// that is not connected: the refusal has to come from the guard, not from
+	// the connection or from the registry lookup that follows it. A guard that
+	// ran later would still refuse this request and would stop refusing one
+	// whose type the registry does not know.
+	_, err := (&Client{}).CallRequest("SetInputSettings", map[string]interface{}{
+		"inputName":     BridgeInboxSource,
+		"inputSettings": map[string]interface{}{"id": "1", "lua": "return 6 * 7"},
+	})
+	if err == nil {
+		t.Fatal("CallRequest allowed a settings write to the transport")
+	}
+	if !strings.Contains(err.Error(), "run_lua_in_obs") {
+		t.Errorf("the refusal should be the transport guard's, said: %v", err)
+	}
+}
+
+func TestPassthroughFailsClosedWhenTheUUIDLookupFails(t *testing.T) {
+	// Not knowing the transport's uuids means not knowing that this request
+	// misses them. The lookup only fails when OBS is unreachable, in which case
+	// the request itself was going to fail anyway.
+	broken := func() (map[string]string, error) {
+		return nil, errors.New("not connected to OBS")
+	}
+
+	err := checkRequestAllowed("SetInputSettings", map[string]interface{}{
+		"inputUuid":     "9f1c2d33-4e55-4a6b-8c7d-0e1f2a3b4c5d",
+		"inputSettings": map[string]interface{}{"lua": "return 1"},
+	}, broken)
+	if err == nil {
+		t.Fatal("a uuid-addressed write was allowed while the transport uuids were unknown")
+	}
+	if !strings.Contains(err.Error(), "not connected to OBS") {
+		t.Errorf("the refusal should carry why the lookup failed, said: %v", err)
 	}
 }

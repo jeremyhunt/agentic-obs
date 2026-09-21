@@ -23,8 +23,13 @@ const (
 	// Two sources rather than one: sharing a single source would echo every
 	// write back to whoever made it, so agentic-obs would read its own
 	// commands and the script would re-run its own replies.
-	InboxSource   = "agentic-obs-inbox"
-	MailboxSource = "agentic-obs-mailbox"
+	//
+	// The literals live in internal/obs, which this package imports, because
+	// the passthrough guard in internal/obs/dispatch.go needs them and cannot
+	// import this package back. Aliased rather than repeated so there is one
+	// spelling of each name in the binary.
+	InboxSource   = obs.BridgeInboxSource
+	MailboxSource = obs.BridgeMailboxSource
 
 	// DefaultTimeout is generous against a round trip measured at 30ms. It is
 	// the bound on a chunk that wedges, not on normal latency.
