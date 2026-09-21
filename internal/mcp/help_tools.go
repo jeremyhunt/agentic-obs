@@ -246,6 +246,14 @@ an event, and an automation rule watching the scene fires on each one.
   refcounts sources, so an input goes away by itself once nothing references it
 - Apply a spec captured with include_settings or include_filters off
 
+**Shared URLs**: settings are written with overlay=false so the live source
+matches the document, which is right for every key the spec owns and is exactly
+what drops a key it does not. A browser source whose URL has a second writer --
+a dashboard setting text or until on the same URL -- names those parameters as
+preserve_url_params on its entry in sources[], and they are carried over on the
+write and ignored by the diff. A capture never fills this in: only you know
+which parameters are foreign.
+
 **on_unmanaged**: keep is the default because removing is unrecoverable -- a
 scene almost always holds sources configured by hand that the spec was never
 meant to own.
@@ -297,6 +305,10 @@ an apply would act on, so a diff is the dry run.
 - Bounds dimensions are ignored under OBS_BOUNDS_NONE, where they are inert
 - 1920 and 1920.0 are the same value; a spec that has been through JSON carries
   numbers as float64
+- A query parameter named in a source's preserve_url_params. It belongs to
+  another writer, so the spec does not describe it and a difference in it is not
+  drift. Without this the source drifts on every diff and an apply rewrites a
+  URL that was correct
 
 **Refused**: a spec captured from a different scene, and a spec captured with
 include_settings or include_filters off -- it would report everything it skipped
@@ -333,6 +345,11 @@ several times, fighting itself, or drop a placement.
 
 **Output**: spec (the document), scene, source_count, item_count, and a note if
 anything was omitted.
+
+**One field a capture never fills in**: preserve_url_params, which names the
+query parameters of a browser source's URL that belong to another writer. Only
+you know which those are, and guessing would be worse than asking. Add it by
+hand to a source entry before storing the spec.
 
 **The document**:
 - version -- schema version, so a stored spec can be migrated
@@ -711,6 +728,8 @@ is safe with this and not with them.
 - settings (object, optional): Settings to apply
 - overlay (bool, optional, default true): Merge settings, or replace them when
   false
+- preserve_url_params (array of string, optional): Query parameters of the
+  existing url that belong to another writer and must survive this call
 
 **Output**:
 - action: one of created, placed, updated, unchanged
@@ -739,6 +758,19 @@ after editing and only what changed is written.
 reference, not a copy. One overlay configured once can appear in several scenes,
 and a later settings change reaches all of them. That is usually what you want;
 when it is not, use a different source_name.
+
+**Note on shared URLs**: a browser source's URL can have more than one writer.
+Here the "Starting Soon" overlay is the case -- one script owns the page and its
+geometry, and the streaming dashboard owns text and until, which it sets by
+rewriting the same URL. Whichever writes last drops the other's parameters.
+Naming them in preserve_url_params carries them over:
+
+  "settings": { "url": "http://localhost:8791/soon.html?quad=2" },
+  "preserve_url_params": ["text", "until"]
+
+writes quad=2 and keeps whatever text and until are live. A parameter you set
+yourself wins over the live one -- naming it means "keep it if I did not say".
+A call that differs only by a preserved parameter reports unchanged.
 
 **Refusals**: if the name is taken by an input of a different kind, this fails
 rather than guessing. Silently updating would leave you believing you have a

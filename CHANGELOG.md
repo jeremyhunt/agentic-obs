@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **A URL can have a second writer, and now survives one (FB-89)** —
+  `preserve_url_params` on `ensure_input`, and the same field on a source in a
+  scene spec. A browser source’s URL is one settings key, so a writer that
+  rewrites it replaces the whole thing — including parameters somebody else
+  owns. The "Starting Soon" overlay here is the case: one script owns the page
+  and its quad geometry, the streaming dashboard owns `text` and `until`, and
+  each re-run of the setup wiped the dashboard’s. `obs_starting_soon.py`
+  carries its own `keep_dock_params()` to work around it.
+
+  Naming a parameter means *keep it if I did not say*, so a value given in the
+  call still wins and the key cannot end up in the URL twice. It is honoured in
+  three places, because one without the others is useless: an apply carries the
+  parameters onto the write, a **diff ignores them** — otherwise the source
+  drifts on every comparison and an apply rewrites a URL that was correct —
+  and `ensure_input` reports `unchanged` when a URL differs by nothing else.
+
+  The merge appends to the string rather than re-encoding the URL, and that is
+  the design rather than an optimisation. `url.Values.Encode` sorts keys and
+  escapes characters a URL may carry raw, so a round trip would rewrite
+  `?quad=0,0,1920,0&grade=1` into a different string with the same meaning —
+  and a spec whose URL comes back different from the one it stores drifts
+  forever. A capture never fills the field in: only the author knows which
+  parameters are foreign.
+
+### Fixed
+- **The fake shared its settings map with the caller (FB-89)** — `CreateInput`
+  stored the map it was handed instead of copying it, so editing that map
+  afterwards changed the source with no write. OBS receives settings as JSON
+  over a socket and cannot share a map with a caller even in principle.
+
+  It surfaced by making a new test pass for the wrong reason: a test that
+  created an input, had a second writer append a URL parameter, and then
+  re-ensured the *original* settings found those settings already mutated, so
+  the "nothing needs doing" case it was written to prove was never exercised.
+  A contract row covers it now, and passes against the fake, the mock and OBS
+  32.2.2 — 32 rows.
+
 ### Changed
 - **The two test doubles are now one world (FB-88)** — `MockOBSClient`'s OBS
   state moved onto `obstest.Fake`, the double the behavioural contract and a live

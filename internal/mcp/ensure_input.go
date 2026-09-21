@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ironystock/agentic-obs/internal/obs"
+	"github.com/ironystock/agentic-obs/internal/scenespec"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -20,6 +21,10 @@ type EnsureInputInput struct {
 	// Overlay merges into existing settings when true or absent, and replaces
 	// them when false. Same meaning as set_source_settings.
 	Overlay *bool `json:"overlay,omitempty" jsonschema:"Merge settings (default) or replace them"`
+
+	// PreserveURLParams names query parameters of the existing URL that belong
+	// to another writer and must survive this call.
+	PreserveURLParams []string `json:"preserve_url_params,omitempty" jsonschema:"Query parameters of the existing url to carry over, for a URL with another writer"`
 }
 
 // handleEnsureInput makes an input exist, in a scene, configured as asked.
@@ -106,6 +111,16 @@ func (s *Server) ensureInput(input EnsureInputInput, exists bool) (string, int, 
 				input.SourceName, input.SceneName, err)
 		}
 		if len(input.Settings) > 0 {
+			// The input exists elsewhere, so it has a live URL to carry
+			// parameters from -- but nothing has read it on this path, so a
+			// caller that asked for preservation pays for one read here.
+			if len(input.PreserveURLParams) > 0 {
+				current, err := s.obsClient.GetSourceSettings(input.SourceName)
+				if err != nil {
+					return "", 0, fmt.Errorf("failed to read settings for '%s': %w", input.SourceName, err)
+				}
+				input.Settings = scenespec.PreserveURLParams(input.Settings, current, input.PreserveURLParams)
+			}
 			if err := s.applySettings(input); err != nil {
 				return "", 0, err
 			}
@@ -121,6 +136,16 @@ func (s *Server) ensureInput(input EnsureInputInput, exists bool) (string, int, 
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to read settings for '%s': %w", input.SourceName, err)
 	}
+	// Parameters another writer owns are carried onto what is about to be
+	// written, before the comparison rather than after it. A URL that differs
+	// only by one of them is not a change, and reporting "updated" for it would
+	// make every re-run of a setup script look like a write.
+	//
+	// The helper lives in internal/scenespec because a spec needs the same rule
+	// for the same reason: it writes settings with overlay=false, which is right
+	// for every key it owns and is exactly what drops a key it does not.
+	input.Settings = scenespec.PreserveURLParams(input.Settings, current, input.PreserveURLParams)
+
 	if settingsAlreadyApplied(current, input.Settings) {
 		return "unchanged", sceneItemID, nil
 	}

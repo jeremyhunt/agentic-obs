@@ -224,7 +224,13 @@ func diffSettings(client DiffReader, want, got SourceSpec) []Finding {
 		defaults = d
 	}
 
-	wantFull := mergeOver(defaults, want.Settings)
+	// A parameter the spec says belongs to another writer is carried onto the
+	// spec's URL before comparing, so it is the same on both sides and cannot
+	// read as drift. Without this the source drifts on every diff, and an apply
+	// that always has work to do is one nobody trusts.
+	wantSettings := PreserveURLParams(want.Settings, got.Settings, want.PreserveURLParams)
+
+	wantFull := mergeOver(defaults, wantSettings)
 	gotFull := mergeOver(defaults, got.Settings)
 
 	findings := []Finding{}
