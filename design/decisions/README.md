@@ -18,6 +18,7 @@ This directory documents significant architectural decisions for the agentic-obs
 | [010](010-self-write-suppression.md) | Self-Write Suppression in the Automation Engine (FB-85) | Accepted | 2026-09-21 |
 | [011](011-declarative-scene-specs.md) | Declarative Scene Specs (FB-82, FB-83, FB-84, FB-89) | Accepted | 2026-09-21 |
 | [012](012-extension-channel.md) | The Extension Channel: Vendor Requests and a Raw-Request Passthrough (FB-77, FB-78, FB-81) | Accepted | 2026-09-21 |
+| [013](013-the-lua-bridge.md) | The Lua Bridge: Shipping Code Instead of Reloading It | Accepted | 2026-09-21 |
 
 ## ADR Template
 
