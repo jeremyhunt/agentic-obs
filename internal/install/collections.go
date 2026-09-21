@@ -147,6 +147,14 @@ func setScriptList(doc map[string]interface{}, list []interface{}) {
 	modules[scriptsKey] = list
 }
 
+// entryPath reads one script entry's path, exactly as the collection stores it.
+//
+// Callers compare it through obsScriptPath rather than raw. An entry written by
+// an agentic-obs from before the slash fix holds backslashes, and one written
+// by OBS's own Scripts dialog holds forward slashes; comparing raw means
+// uninstall silently misses the stale entry and the next install adds a second
+// one beside it. Only the stored side needs normalising -- installInto is the
+// only caller, and it hands both functions an already-normalised scriptPath.
 func entryPath(entry interface{}) string {
 	obj, _ := entry.(map[string]interface{})
 	if obj == nil {
@@ -186,7 +194,7 @@ func AddScript(collectionPath, scriptPath string) (bool, error) {
 	}
 
 	for _, entry := range list {
-		if entryPath(entry) == scriptPath {
+		if obsScriptPath(entryPath(entry)) == scriptPath {
 			return false, nil
 		}
 	}
@@ -219,7 +227,7 @@ func RemoveScript(collectionPath, scriptPath string) (bool, error) {
 	kept := make([]interface{}, 0, len(list))
 	removed := false
 	for _, entry := range list {
-		if entryPath(entry) == scriptPath {
+		if obsScriptPath(entryPath(entry)) == scriptPath {
 			removed = true
 			continue
 		}

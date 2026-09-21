@@ -250,6 +250,95 @@ func TestAddScriptHandlesNullModules(t *testing.T) {
 	}
 }
 
+// An agentic-obs from before the slash fix wrote backslash entries on Windows.
+// Comparing raw means uninstall-bridge cannot find one: it would leave the
+// stale entry behind, and the next install would add a second beside it --
+// the bridge loaded twice, two sources named agentic-obs-inbox, only one
+// addressable. Both sides of the comparison must agree on separators.
+func TestScriptEntriesMatchAcrossSeparators(t *testing.T) {
+	const stored = `C:\Users\someone\AppData\Roaming\agentic-obs\bridge\agentic-obs-bridge.lua`
+	const wanted = "C:/Users/someone/AppData/Roaming/agentic-obs/bridge/agentic-obs-bridge.lua"
+
+	write := func(t *testing.T) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "collection.json")
+		doc, err := json.Marshal(map[string]interface{}{
+			"name": "Pre-fix",
+			"modules": map[string]interface{}{
+				scriptsKey: []interface{}{
+					map[string]interface{}{"path": stored, "settings": map[string]interface{}{}},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if err := os.WriteFile(path, doc, 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		return path
+	}
+
+	t.Run("RemoveScript finds a backslash entry", func(t *testing.T) {
+		path := write(t)
+
+		removed, err := RemoveScript(path, wanted)
+		if err != nil {
+			t.Fatalf("RemoveScript: %v", err)
+		}
+		if !removed {
+			t.Fatal("uninstall could not find the entry it installed before the slash fix")
+		}
+		if scripts := readScripts(t, path); len(scripts) != 0 {
+			t.Fatalf("the stale entry survived: %v", scripts)
+		}
+	})
+
+	t.Run("AddScript treats a backslash entry as already present", func(t *testing.T) {
+		path := write(t)
+
+		changed, err := AddScript(path, wanted)
+		if err != nil {
+			t.Fatalf("AddScript: %v", err)
+		}
+		if changed {
+			t.Error("install added a second entry for a file already registered")
+		}
+		if scripts := readScripts(t, path); len(scripts) != 1 {
+			t.Fatalf("collection holds %d entries for one file: %v", len(scripts), scripts)
+		}
+	})
+}
+
+// Another script whose path merely resembles ours is still left alone: the
+// normalisation must not widen what a removal matches.
+func TestRemoveScriptStillLeavesOtherEntriesAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "collection.json")
+	if err := os.WriteFile(path, []byte(`{
+		"modules": {
+			"scripts-tool": [
+				{"path": "C:/other/agentic-obs-bridge.lua", "settings": {}},
+				{"path": "C:/agentic-obs/bridge.lua", "settings": {}}
+			]
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	removed, err := RemoveScript(path, "C:/agentic-obs/bridge.lua")
+	if err != nil {
+		t.Fatalf("RemoveScript: %v", err)
+	}
+	if !removed {
+		t.Fatal("our own entry was not removed")
+	}
+
+	scripts := readScripts(t, path)
+	if len(scripts) != 1 || scripts[0] != "C:/other/agentic-obs-bridge.lua" {
+		t.Fatalf("got %v, want only the unrelated script left", scripts)
+	}
+}
+
 func TestAddScriptHandlesNullDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "null.json")
 	if err := os.WriteFile(path, []byte(`null`), 0o644); err != nil {
