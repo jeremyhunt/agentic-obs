@@ -216,6 +216,14 @@ The scene may be on air.
 - scene_name (string, optional): Defaults to the scene the spec came from
 - dry_run (bool, optional, default TRUE): Plan without writing
 - on_unmanaged (string, optional, default "keep"): keep | hide | remove
+- fields (array of string, optional): Aspects to reconcile. Omit for all of them
+
+**fields** restricts what this apply may touch: source, placement, kind,
+settings, filters, transform, enabled, locked, blend_mode, order.
+fields=["enabled"] is a visibility preset -- it restores what is shown and
+leaves geometry somebody moved on purpose alone, and it will not put back a
+placement that was deleted. The report echoes what it looked at, because
+"nothing left to do" from a restricted apply means less than it looks.
 
 **Output**: ops[] with one entry per operation, by_result counts, and before --
 the scene as it was.
@@ -292,8 +300,16 @@ an apply would act on, so a diff is the dry run.
 - spec (object, required): A spec document, as returned by capture_scene_spec
 - scene_name (string, optional): Scene to compare against. Defaults to the scene
   the spec was captured from
+- fields (array of string, optional): Aspects to compare. Omit for all of them
 
-**Output**: findings[], count, by_kind, matches (true when nothing differs).
+**Output**: findings[], count, by_kind, matches (true when nothing differs), and
+fields when the comparison was restricted.
+
+**fields** restricts what is compared, for a caller that owns part of a scene
+rather than all of it: source, placement, kind, settings, filters, transform,
+enabled, locked, blend_mode, order. An unknown name is rejected rather than
+ignored -- a typo that silently matched nothing would report no differences and
+look exactly like a match.
 
 **The five kinds, and what each means for an apply**:
 - drift -- a managed value moved. An apply writes it back

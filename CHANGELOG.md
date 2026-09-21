@@ -7,6 +7,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **A diff or an apply can be restricted to the part of a scene you own
+  (FB-92)** — `fields` on `diff_scene_spec` and `apply_scene_spec`, naming the
+  aspects to consider: source, placement, kind, settings, filters, transform,
+  enabled, locked, blend_mode, order. It was in the plan’s tool contracts for
+  both tools and had not been built.
+
+  A spec describes a whole scene, but a caller often owns only part of one.
+  `fields: ["enabled"]` is a visibility preset: it restores what is shown, leaves
+  a transform somebody moved on purpose alone, and will not quietly put back a
+  layer that was deleted.
+
+  It is expressed once. An apply acts on a diff, so masking the diff masks the
+  writes and the two cannot disagree about what is in scope; only the steps that
+  are *not* findings — creating a missing source or placement, the ordering
+  pass, the prune — needed their own gate.
+
+  **An unknown name is rejected, not ignored.** That is the whole safety
+  property: a typo that silently matched nothing would make a diff report no
+  differences and an apply write nothing, and both would look exactly like
+  success. For the same reason a restricted report echoes what it looked at,
+  since "nothing left to do" means less than it appears.
+
 - **A scene spec can say what a placement means, not just where it sits
   (FB-91)** — a `layout` block on a placement, resolved against the live canvas
   on every apply and every diff. This was 4a’s own acceptance criterion and

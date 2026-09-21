@@ -80,6 +80,27 @@ const (
 // It is a read. Nothing here changes OBS, and the findings are what an apply
 // would act on -- so a diff is also the dry run.
 func Diff(client DiffReader, spec *Spec, sceneName string) ([]Finding, error) {
+	return DiffWith(client, spec, sceneName, DiffOptions{})
+}
+
+// DiffOptions restricts what a diff looks at.
+type DiffOptions struct {
+	// Fields names the aspects to compare. Empty means all of them, which is
+	// what Diff asks for. See the Field* constants.
+	Fields []string
+}
+
+// DiffWith is Diff, restricted to the aspects the caller owns.
+//
+// A caller that owns only visibility -- a scene preset is exactly that -- would
+// otherwise be told about every transform anyone had nudged since the document
+// was captured, and an apply built on those findings would put them back.
+func DiffWith(client DiffReader, spec *Spec, sceneName string, opts DiffOptions) ([]Finding, error) {
+	mask, err := newFieldMask(opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+
 	if spec == nil {
 		return nil, fmt.Errorf("no spec to diff")
 	}
@@ -114,6 +135,7 @@ func Diff(client DiffReader, spec *Spec, sceneName string) ([]Finding, error) {
 	findings := []Finding{}
 	findings = append(findings, diffSources(client, spec, live)...)
 	findings = append(findings, diffItems(spec, live)...)
+	findings = filterFindings(findings, mask)
 
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Subject != findings[j].Subject {

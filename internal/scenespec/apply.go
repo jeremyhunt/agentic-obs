@@ -41,6 +41,15 @@ type ApplyOptions struct {
 
 	// OnUnmanaged is keep (default), hide or remove.
 	OnUnmanaged string
+
+	// Fields restricts what this apply is allowed to reconcile. Empty means
+	// everything. See the Field* constants.
+	//
+	// It is the same restriction a diff takes, and it reaches the writes the
+	// same way: an apply acts on a diff, so masking the diff masks the writes.
+	// The structural steps -- creating a missing source or placement, and the
+	// ordering pass -- are gated here too, since they are not findings.
+	Fields []string
 }
 
 // OpResult is one operation an apply performed or planned.
@@ -56,6 +65,14 @@ type Report struct {
 	Scene  string     `json:"scene"`
 	DryRun bool       `json:"dry_run"`
 	Ops    []OpResult `json:"ops"`
+
+	// Fields is what this apply was restricted to, empty when it was not.
+	//
+	// A restricted report that did not say so reads as "the scene now matches
+	// the spec", and nothing else in it would show the difference. Normalised
+	// and sorted, so it reflects what was actually compared rather than how the
+	// caller happened to spell it.
+	Fields []string `json:"fields,omitempty"`
 
 	// Before is the scene as it was, captured before anything was written.
 	//
@@ -128,6 +145,10 @@ func Apply(ctx context.Context, client ApplyClient, spec *Spec, sceneName string
 	if opts.OnUnmanaged == "" {
 		opts.OnUnmanaged = UnmanagedKeep
 	}
+	mask, err := newFieldMask(opts.Fields)
+	if err != nil {
+		return nil, err
+	}
 
 	before, err := CaptureWith(client, sceneName, FullCapture())
 	if err != nil {
@@ -146,23 +167,40 @@ func Apply(ctx context.Context, client ApplyClient, spec *Spec, sceneName string
 		return nil, err
 	}
 
-	report := &Report{Scene: sceneName, DryRun: opts.DryRun, Before: before, Ops: []OpResult{}}
-	run := &applyRun{ctx: ctx, client: client, scene: sceneName, opts: opts, report: report}
-
-	run.ensureSources(spec, before)
-	if run.cancelled() {
-		return report, nil
+	report := &Report{
+		Scene:  sceneName,
+		DryRun: opts.DryRun,
+		Before: before,
+		Ops:    []OpResult{},
+		Fields: mask.sortedFields(),
 	}
-	run.ensurePlacements(spec)
-	if run.cancelled() {
-		return report, nil
+	run := &applyRun{ctx: ctx, client: client, scene: sceneName, opts: opts, report: report, mask: mask}
+
+	// Creating a missing source or placement is not a finding, so it is gated
+	// here. An apply restricted to visibility must not quietly put back a layer
+	// somebody deleted.
+	if mask.covers(FieldSource) {
+		run.ensureSources(spec, before)
+		if run.cancelled() {
+			return report, nil
+		}
+	}
+	if mask.covers(FieldPlacement) {
+		run.ensurePlacements(spec)
+		if run.cancelled() {
+			return report, nil
+		}
 	}
 	run.reconcileState(spec)
 	if run.cancelled() {
 		return report, nil
 	}
-	run.reconcileOrder(spec)
-	run.prune(spec)
+	if mask.covers(FieldOrder) {
+		run.reconcileOrder(spec)
+	}
+	if mask.covers(FieldPlacement) {
+		run.prune(spec)
+	}
 
 	return report, nil
 }
@@ -173,6 +211,7 @@ type applyRun struct {
 	scene  string
 	opts   ApplyOptions
 	report *Report
+	mask   fieldMask
 
 	// failed records sources whose earlier op failed, so the ops that depend on
 	// them are skipped with the cause rather than failing again for a reason
@@ -379,7 +418,7 @@ func (r *applyRun) ensurePlacements(spec *Spec) {
 // reconcileState writes settings, filters and per-placement state, but only
 // where a diff says they differ.
 func (r *applyRun) reconcileState(spec *Spec) {
-	findings, err := Diff(r.client, spec, r.scene)
+	findings, err := DiffWith(r.client, spec, r.scene, DiffOptions{Fields: r.opts.Fields})
 	if err != nil {
 		r.record("diff", r.scene, OpFailed, err.Error())
 		return
