@@ -54,6 +54,16 @@ type AutomationEngine struct {
 	// breaker is the backstop for the loops suppression cannot identify: it
 	// disables a rule that keeps firing regardless of why. (FB-86)
 	breaker *breaker
+
+	// debounced holds the timer and the latest payload for each rule waiting
+	// out its quiet period. Guarded by e.mu. (FB-87)
+	debounced map[int64]*pendingRun
+}
+
+// pendingRun is a rule waiting for its debounce window to go quiet.
+type pendingRun struct {
+	timer   timer
+	payload EventPayload
 }
 
 // NewAutomationEngine creates a new automation engine.
@@ -69,6 +79,7 @@ func NewAutomationEngine(db *storage.DB, obsClient OBSClient) *AutomationEngine 
 		breaker:                newBreaker(realClock{}, oscillationThreshold, oscillationWindow),
 		rules:                  make(map[int64]*Rule),
 		cooldowns:              make(map[int64]time.Time),
+		debounced:              make(map[int64]*pendingRun),
 		eventChan:              make(chan EventPayload, 100),
 		executionRetention:     defaultExecutionRetention,
 		retentionSweepInterval: defaultRetentionSweepInterval,
@@ -217,6 +228,11 @@ func (e *AutomationEngine) Stop() {
 	}
 	e.running = false
 	e.mu.Unlock()
+
+	// Before anything else: a debounce timer that fires after this point would
+	// execute a rule against an engine that has released its OBS client, and
+	// would do it after the process believed it had finished.
+	e.cancelDebounces()
 
 	e.cancel()
 
@@ -391,6 +407,10 @@ func (e *AutomationEngine) dispatchEvent(payload EventPayload) {
 
 	// Execute matching rules
 	for _, rule := range matching {
+		if window := rule.GetDebounceMs(); window > 0 {
+			e.deferRule(rule, payload, time.Duration(window)*time.Millisecond)
+			continue
+		}
 		// Counted here rather than inside executeRule, because this is where the
 		// decision to run is made. Counting after the fact would let a rule
 		// spawn an unbounded number of goroutines before any of them reported.
@@ -400,6 +420,84 @@ func (e *AutomationEngine) dispatchEvent(payload EventPayload) {
 		}
 		e.wg.Add(1)
 		go e.executeRule(rule, &payload)
+	}
+}
+
+// deferRule restarts a rule's debounce window, keeping the latest payload.
+//
+// Trailing edge: the rule runs after the events stop, on the last one. That is
+// the difference from cooldown, which runs on the *first* event and ignores the
+// rest -- so cooldown acts on the state before the burst, and debounce acts on
+// the state the operator ended up in. Showing nine layers in a scene fires a
+// visibility rule nine times in a few milliseconds, and the rule wants to run
+// once, at the end.
+//
+// The cooldown and breaker checks deliberately happen when the timer fires
+// rather than here. Counting a scheduled run as a run would let a burst consume
+// a rule's cooldown without it ever having executed.
+func (e *AutomationEngine) deferRule(rule *Rule, payload EventPayload, window time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if existing, ok := e.debounced[rule.ID]; ok {
+		existing.timer.Stop()
+	}
+
+	pending := &pendingRun{payload: payload}
+	pending.timer = e.clock.AfterFunc(window, func() { e.runDebounced(rule.ID) })
+	e.debounced[rule.ID] = pending
+}
+
+// runDebounced executes a rule whose window has gone quiet.
+func (e *AutomationEngine) runDebounced(ruleID int64) {
+	e.mu.Lock()
+
+	pending, ok := e.debounced[ruleID]
+	if !ok {
+		e.mu.Unlock()
+		return
+	}
+	delete(e.debounced, ruleID)
+
+	rule, known := e.rules[ruleID]
+	if !known || !rule.Enabled || !e.running {
+		// Stopped, disabled or deleted while the window was running. A timer
+		// that fired into a stopped engine would execute against a client the
+		// engine has already let go of.
+		e.mu.Unlock()
+		return
+	}
+
+	// Cooldown is checked here, where the run actually happens.
+	if !e.checkCooldownLocked(rule) {
+		log.Printf("[Automation] Rule '%s' skipped after debounce (cooldown)", rule.Name)
+		e.mu.Unlock()
+		return
+	}
+	if rule.CooldownMs > 0 {
+		e.cooldowns[rule.ID] = e.clock.Now()
+	}
+	e.mu.Unlock()
+
+	if tripped, count := e.breaker.Record(rule.ID); tripped {
+		e.tripRule(rule, count)
+		return
+	}
+
+	payload := pending.payload
+	e.wg.Add(1)
+	go e.executeRule(rule, &payload)
+}
+
+// cancelDebounces drops every pending run. Called while stopping, so a timer
+// cannot fire into an engine that has shut down.
+func (e *AutomationEngine) cancelDebounces() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for id, pending := range e.debounced {
+		pending.timer.Stop()
+		delete(e.debounced, id)
 	}
 }
 
