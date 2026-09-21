@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ironystock/agentic-obs/internal/obs"
 	"github.com/ironystock/agentic-obs/internal/obs/obstest"
 	"github.com/ironystock/agentic-obs/internal/scenespec"
 )
@@ -447,5 +448,149 @@ func TestCaptureDamageApplyRoundTrips(t *testing.T) {
 	if len(findings) != 0 {
 		t.Errorf("the scene does not match the spec after applying it:\n%s",
 			render(findings))
+	}
+}
+
+// The bridge's transport is a pair of sources addressed by name, and an apply
+// writes the settings of every input its spec names. A spec is caller-supplied,
+// so a hand-authored one naming agentic-obs-inbox carries the scripting
+// channel's own payload to the place that executes it -- reached with no build
+// tag, no AGENTIC_OBS_SCRIPTING and no confirmation.
+//
+// A captured spec never names it. The transport belongs to no scene, so nothing
+// that reads a scene can see it; only a hand-authored document can.
+
+// withBridgeInbox puts the transport into the fake, where it has to live in
+// some scene because the fake mirrors OBS's refcounting, and returns a spec
+// that writes the bridge a chunk.
+func withBridgeInbox(t *testing.T, f *obstest.Fake, scene string) *scenespec.Spec {
+	t.Helper()
+	if _, err := f.CreateInput("Other", obs.BridgeInboxSource, "color_source_v3", nil); err != nil {
+		t.Fatalf("CreateInput %s: %v", obs.BridgeInboxSource, err)
+	}
+	return &scenespec.Spec{
+		Version: scenespec.SpecVersion,
+		Scene:   scene,
+		Sources: []scenespec.SourceSpec{{
+			Name: obs.BridgeInboxSource,
+			Type: scenespec.SourceInput,
+			Kind: "color_source_v3",
+			Settings: map[string]interface{}{
+				"id": "1", "lua": "return 6 * 7",
+			},
+		}},
+		Items: []scenespec.ItemSpec{{Source: obs.BridgeInboxSource, Enabled: true}},
+	}
+}
+
+func TestApplyRefusesASpecNamingTheBridgeTransport(t *testing.T) {
+	f, scene := fixture(t)
+	spec := withBridgeInbox(t, f, scene)
+
+	_, err := scenespec.Apply(context.Background(), f, spec, scene,
+		scenespec.ApplyOptions{DryRun: false})
+	if err == nil {
+		t.Fatal("a spec naming the bridge's transport was applied")
+	}
+	if !strings.Contains(err.Error(), obs.BridgeInboxSource) {
+		t.Errorf("the refusal should name the source it refused, said: %v", err)
+	}
+
+	// Refused before OBS was touched, not reported after the fact.
+	settings, err := f.GetSourceSettings(obs.BridgeInboxSource)
+	if err != nil {
+		t.Fatalf("GetSourceSettings: %v", err)
+	}
+	if _, wrote := settings["lua"]; wrote {
+		t.Error("the chunk reached the inbox")
+	}
+}
+
+func TestApplyRefusesTheTransportNamedOnlyAsAPlacement(t *testing.T) {
+	// The other half of a spec. ensurePlacements would put the transport into
+	// a live scene from this alone, and prune with on_unmanaged=remove would
+	// take a placement of it out.
+	f, scene := fixture(t)
+	if _, err := f.CreateInput("Other", obs.BridgeMailboxSource, "color_source_v3", nil); err != nil {
+		t.Fatalf("CreateInput: %v", err)
+	}
+
+	spec, err := scenespec.Capture(f, scene)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	spec.Items = append(spec.Items, scenespec.ItemSpec{Source: obs.BridgeMailboxSource, Enabled: true})
+
+	if _, err := scenespec.Apply(context.Background(), f, spec, scene,
+		scenespec.ApplyOptions{DryRun: false}); err == nil {
+		t.Fatal("a spec placing the bridge's transport was applied")
+	}
+
+	live, err := f.GetSceneByName(scene)
+	if err != nil {
+		t.Fatalf("GetSceneByName: %v", err)
+	}
+	for _, item := range live.Sources {
+		if item.Name == obs.BridgeMailboxSource {
+			t.Error("the transport was placed in the scene before the apply was refused")
+		}
+	}
+}
+
+func TestApplyRefusesTheWholeSpecRatherThanSkippingTheTransport(t *testing.T) {
+	// A partial apply reported as a success is its own defect: the caller asked
+	// for a scene to match a document, and quietly declining one source leaves a
+	// scene neither the spec nor the operator describes. So the legitimate
+	// repair in this spec must not land either.
+	f, scene := fixture(t)
+	spec, err := scenespec.Capture(f, scene)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+
+	if err := f.SetSourceSettings("host_avatar",
+		map[string]interface{}{"file": "wrong.png"}, false); err != nil {
+		t.Fatalf("SetSourceSettings: %v", err)
+	}
+
+	inbox := withBridgeInbox(t, f, scene)
+	spec.Sources = append(spec.Sources, inbox.Sources...)
+
+	if _, err := scenespec.Apply(context.Background(), f, spec, scene,
+		scenespec.ApplyOptions{DryRun: false}); err == nil {
+		t.Fatal("a spec naming the bridge's transport was applied")
+	}
+
+	settings, err := f.GetSourceSettings("host_avatar")
+	if err != nil {
+		t.Fatalf("GetSourceSettings: %v", err)
+	}
+	if settings["file"] != "wrong.png" {
+		t.Errorf("part of the refused spec was applied anyway: host_avatar's file is %v", settings["file"])
+	}
+}
+
+func TestApplyDryRunMayStillPlanAgainstTheTransport(t *testing.T) {
+	// Deliberately open, and stated here so it is a decision rather than a gap.
+	// A dry run writes nothing, and planning is how a caller discovers that a
+	// stored spec is contaminated in the first place.
+	f, scene := fixture(t)
+	spec := withBridgeInbox(t, f, scene)
+
+	report, err := scenespec.Apply(context.Background(), f, spec, scene,
+		scenespec.ApplyOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("a dry run naming the transport should still plan: %v", err)
+	}
+	if len(report.Ops) == 0 {
+		t.Error("the dry run planned nothing, so it reported nothing about the transport")
+	}
+
+	settings, err := f.GetSourceSettings(obs.BridgeInboxSource)
+	if err != nil {
+		t.Fatalf("GetSourceSettings: %v", err)
+	}
+	if _, wrote := settings["lua"]; wrote {
+		t.Error("a dry run wrote to the inbox")
 	}
 }

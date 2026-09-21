@@ -6,6 +6,7 @@ import (
 
 	"github.com/ironystock/agentic-obs/internal/bridge"
 	"github.com/ironystock/agentic-obs/internal/mcp/testutil"
+	"github.com/ironystock/agentic-obs/internal/scenespec"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -220,4 +221,62 @@ func TestReadingTheBridgeTransportIsNotRefused(t *testing.T) {
 		SourceName: bridge.MailboxSource,
 	})
 	assert.NoError(t, err, "reads of the transport stay open")
+}
+
+// apply_scene_spec was the second of the two routes ADR-013 recorded as open.
+// The guard is in scenespec.Apply rather than in this handler, so every caller
+// of the reconciler inherits it; these tests pin that the tool surfaces it.
+func TestApplySceneSpecRefusesASpecNamingTheBridgeTransport(t *testing.T) {
+	transportSpec := func(scene, name string) *scenespec.Spec {
+		return &scenespec.Spec{
+			Version: scenespec.SpecVersion,
+			Scene:   scene,
+			Sources: []scenespec.SourceSpec{{
+				Name:     name,
+				Type:     scenespec.SourceInput,
+				Kind:     "color_source_v3",
+				Settings: bridgeCommand(),
+			}},
+			Items: []scenespec.ItemSpec{{Source: name, Enabled: true}},
+		}
+	}
+
+	for _, name := range []string{bridge.InboxSource, bridge.MailboxSource} {
+		t.Run(name, func(t *testing.T) {
+			server, mock := testServer(t)
+			_, err := mock.CreateInput("Scene 1", name, "color_source_v3", nil)
+			require.NoError(t, err)
+
+			writes := false
+			_, _, err = server.handleApplySceneSpec(context.Background(), nil, ApplySceneSpecInput{
+				Spec:      transportSpec("Gaming", name),
+				SceneName: "Gaming",
+				DryRun:    &writes,
+			})
+			require.Error(t, err, "an apply naming the transport must be refused")
+			assert.Contains(t, err.Error(), name)
+
+			settings, err := mock.GetSourceSettings(name)
+			require.NoError(t, err)
+			assert.NotContains(t, settings, "lua", "the chunk must not have reached the transport")
+		})
+	}
+
+	// The dry run stays open on purpose: it writes nothing, and planning is how
+	// a caller finds out a stored spec names the transport at all.
+	t.Run("the dry run still plans", func(t *testing.T) {
+		server, mock := testServer(t)
+		_, err := mock.CreateInput("Scene 1", bridge.InboxSource, "color_source_v3", nil)
+		require.NoError(t, err)
+
+		_, _, err = server.handleApplySceneSpec(context.Background(), nil, ApplySceneSpecInput{
+			Spec:      transportSpec("Gaming", bridge.InboxSource),
+			SceneName: "Gaming",
+		})
+		assert.NoError(t, err, "apply_scene_spec defaults to a dry run, which writes nothing")
+
+		settings, err := mock.GetSourceSettings(bridge.InboxSource)
+		require.NoError(t, err)
+		assert.NotContains(t, settings, "lua")
+	})
 }

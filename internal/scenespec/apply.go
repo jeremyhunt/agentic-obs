@@ -128,6 +128,30 @@ func Apply(ctx context.Context, client ApplyClient, spec *Spec, sceneName string
 	if spec == nil {
 		return nil, fmt.Errorf("no spec to apply")
 	}
+	if !opts.DryRun {
+		// A spec is caller-supplied and an apply writes the settings of every
+		// input it names, so a hand-authored spec naming the bridge's inbox is
+		// the scripting channel's payload by another route. A capture never
+		// produces one: the transport belongs to no scene, so nothing that
+		// reads a scene can see it.
+		//
+		// Refused whole rather than with that one source skipped. A partial
+		// apply reported as a success is its own defect -- the caller asked for
+		// a scene to match a document, and silently declining part of the
+		// document leaves a scene neither the spec nor the operator describes.
+		//
+		// Dry runs and diffs are left alone: they write nothing, and planning
+		// against a spec is how a caller finds out its spec is contaminated.
+		if name, found := bridgeTransportIn(spec); found {
+			return nil, fmt.Errorf(
+				"this spec names %q, which is the Lua bridge's transport: applying it would write that "+
+					"source's settings, and a settings write there runs code inside the OBS process. The "+
+					"whole apply is refused rather than that one source skipped, so nothing lands that "+
+					"the spec did not describe. Take it out of the spec, or re-run with dry_run to see "+
+					"what the rest would do",
+				name)
+		}
+	}
 	if len(spec.Omitted) > 0 {
 		// A spec captured without settings describes a layout, not a scene.
 		// Applying it would write empty settings over every source in it.
@@ -203,6 +227,33 @@ func Apply(ctx context.Context, client ApplyClient, spec *Spec, sceneName string
 	}
 
 	return report, nil
+}
+
+// bridgeTransportIn reports the first reserved transport source a spec names,
+// anywhere it can name one: as a source, as a placement, or as a child of a
+// group. A placement is checked as well as a source because an apply reaches
+// the transport through either -- ensurePlacements would put it in a scene,
+// and prune with on_unmanaged=remove would take a placement out.
+//
+// The test is obs.IsBridgeTransport rather than a literal, so the two names
+// have one spelling across the four packages that guard them.
+func bridgeTransportIn(spec *Spec) (string, bool) {
+	for _, source := range spec.Sources {
+		if obs.IsBridgeTransport(source.Name) {
+			return source.Name, true
+		}
+		for _, child := range source.Items {
+			if obs.IsBridgeTransport(child.Source) {
+				return child.Source, true
+			}
+		}
+	}
+	for _, item := range spec.Items {
+		if obs.IsBridgeTransport(item.Source) {
+			return item.Source, true
+		}
+	}
+	return "", false
 }
 
 type applyRun struct {
