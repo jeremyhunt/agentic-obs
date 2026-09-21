@@ -1,9 +1,6 @@
 package testutil
 
 import (
-	"fmt"
-	"sort"
-
 	"github.com/ironystock/agentic-obs/internal/obs"
 )
 
@@ -19,53 +16,19 @@ import (
 // obs-websocket has no CreateGroup, so nothing here pretends a group can be
 // made over the wire; SetGroup seeds one the way a collection file would.
 
-// SetGroup declares a group and its contents.
+// SetGroup declares a group and places the named sources in it.
+//
+// obs-websocket has no CreateGroup, so a group can only be seeded. The contents
+// are placed through the world rather than stored beside it, which is what makes
+// GetGroupSceneItemList and GetSceneByName agree about them.
 func (m *MockOBSClient) SetGroup(name string, items []obs.SceneSource) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.groups == nil {
-		m.groups = map[string][]obs.SceneSource{}
+	if err := m.world.CreateGroup(name); err != nil {
+		return // already declared
 	}
-	m.groups[name] = items
-}
-
-// GetGroupList returns the names of every group.
-func (m *MockOBSClient) GetGroupList() ([]string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	out := make([]string, 0, len(m.groups))
-	for name := range m.groups {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-// GetGroupSceneItemList returns a group's contents, and refuses a scene.
-func (m *MockOBSClient) GetGroupSceneItemList(groupName string) ([]obs.SceneSource, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if !m.connected {
-		return nil, fmt.Errorf("not connected to OBS")
-	}
-
-	items, ok := m.groups[groupName]
-	if !ok {
-		// obs-websocket distinguishes these, and so does the fake: a name that
-		// is a scene gets "is scene", a name that is nothing gets not-found.
-		for _, scene := range m.scenes {
-			if scene == groupName {
-				return nil, fmt.Errorf("the specified source is not a group. (is scene): %q", groupName)
-			}
+	for _, item := range items {
+		if _, err := m.world.CreateInput(name, item.Name, item.Type, nil); err != nil {
+			// Already an input somewhere: place the existing one instead.
+			_, _ = m.world.CreateSceneItem(name, item.Name, true)
 		}
-		return nil, fmt.Errorf("group %q not found", groupName)
 	}
-	return append([]obs.SceneSource(nil), items...), nil
 }
