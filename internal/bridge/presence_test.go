@@ -35,6 +35,20 @@ func TestProbeReportsAbsentWhenTheWriteFails(t *testing.T) {
 	}
 }
 
+func TestProbeOnANilTransportReportsAbsentWithoutPanicking(t *testing.T) {
+	// A bare-constructed *Server in a test can easily leave bridge nil; Probe
+	// must report that as "not there" rather than panic on the caller.
+	var transport *Transport
+
+	got := transport.Probe(context.Background())
+	if got.Present {
+		t.Fatal("Present = true for a nil transport")
+	}
+	if got.Detail == "" {
+		t.Error("Detail is empty; a nil transport must say why")
+	}
+}
+
 func TestProbeIsCachedWithinTheTTL(t *testing.T) {
 	var transport *Transport
 	calls := 0

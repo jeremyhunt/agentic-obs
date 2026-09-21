@@ -41,6 +41,10 @@ type presenceCache struct {
 // way the bridge disappears, and removing it from the Scripts dialog announces
 // nothing at all.
 func (t *Transport) Probe(ctx context.Context) Status {
+	if t == nil {
+		return Status{Detail: "bridge not configured"}
+	}
+
 	ttl := t.PresenceTTL
 	if ttl <= 0 {
 		ttl = DefaultPresenceTTL
