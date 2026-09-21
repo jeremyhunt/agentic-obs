@@ -196,3 +196,28 @@ func TestInstallDoesNotOrphanABackupWhenAnEditFails(t *testing.T) {
 		}
 	}
 }
+
+// Coordinator review finding C: AddScript/RemoveScript's own errors (e.g.
+// scriptList's "modules.scripts-tool must be an array") don't carry a path.
+// On --all across several collections, an operator seeing the bare message
+// had no way to tell which collection failed except by inferring it from
+// alphabetical order. installInto must name it.
+func TestInstallErrorNamesTheFailingCollection(t *testing.T) {
+	scenes := t.TempDir()
+	good := filepath.Join(scenes, "AAA_Good.json")
+	bad := filepath.Join(scenes, "ZZZ_Bad.json")
+	if err := os.WriteFile(good, []byte(`{"name":"Good"}`), 0o644); err != nil {
+		t.Fatalf("write good: %v", err)
+	}
+	if err := os.WriteFile(bad, []byte(`{"name":"Bad","modules":{"scripts-tool":"not an array"}}`), 0o644); err != nil {
+		t.Fatalf("write bad: %v", err)
+	}
+
+	_, err := installInto(scenes, t.TempDir(), Options{All: true})
+	if err == nil {
+		t.Fatal("installInto succeeded despite a non-array scripts-tool")
+	}
+	if !strings.Contains(err.Error(), bad) {
+		t.Errorf("error %q does not name the failing collection %s", err.Error(), bad)
+	}
+}

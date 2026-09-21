@@ -419,6 +419,9 @@ func runBridgeInstall(args []string, remove bool) int {
 	for _, path := range report.Skipped {
 		fmt.Printf("  no change %s\n", path)
 	}
+	for _, path := range report.Backups {
+		fmt.Printf("  backup   %s\n", path)
+	}
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)

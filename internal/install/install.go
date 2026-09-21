@@ -175,7 +175,11 @@ func installInto(scenesDir, scriptDir string, opts Options) (Report, error) {
 			// Without this, a failed edit leaves an orphaned backup that
 			// report.Backups never mentions.
 			_ = os.Remove(backup)
-			return report, err
+			// AddScript/RemoveScript's own errors don't carry a path (e.g.
+			// scriptList's "modules.scripts-tool must be an array"), so on
+			// --all across several collections there would be no way to tell
+			// which one failed except by inference from alphabetical order.
+			return report, fmt.Errorf("%s: %w", path, err)
 		}
 
 		if changed {
