@@ -114,6 +114,25 @@ func writeScript(dir string) (string, error) {
 	return path, nil
 }
 
+// obsScriptPath renders a path the way OBS's Lua loader needs it: forward
+// slashes, on every platform.
+//
+// obs_lua_script_create (shared/obs-scripting/obs-scripting-lua.c) splits the
+// path on '/' only. The Python backend normalises backslashes; the Lua backend
+// does not. filepath.Join gives backslashes on Windows, so a collection would
+// carry a path OBS cannot parse -- and OBS's own Scripts dialog writes forward
+// slashes, so a hand-added entry for the same file would not match ours
+// either. AddScript's idempotency check is an exact string compare, so that
+// mismatch means a SECOND entry for the same file, the bridge loaded twice,
+// and two sources named agentic-obs-inbox of which only one is addressable.
+func obsScriptPath(path string) string {
+	// ToSlash converts *this* platform's separator, which is a no-op off
+	// Windows. The explicit replacement is what lets a Linux CI runner see a
+	// Windows-style path normalised, which is the only way this is tested at
+	// all.
+	return strings.ReplaceAll(filepath.ToSlash(path), `\`, "/")
+}
+
 // installInto is Run with its directories injected, which is what the tests
 // drive.
 func installInto(scenesDir, scriptDir string, opts Options) (Report, error) {
@@ -122,7 +141,7 @@ func installInto(scenesDir, scriptDir string, opts Options) (Report, error) {
 	// scriptPath is computed either way: AddScript/RemoveScript only ever
 	// write this string into the collection's JSON, they never read the file
 	// it names, so a dry run can reason about it without the file existing.
-	scriptPath := filepath.Join(scriptDir, scriptName)
+	scriptPath := obsScriptPath(filepath.Join(scriptDir, scriptName))
 
 	// RULING 1: a dry run must not write anything, including the bridge
 	// script itself -- "report what would change, write nothing" has to mean
@@ -133,7 +152,7 @@ func installInto(scenesDir, scriptDir string, opts Options) (Report, error) {
 		if err != nil {
 			return report, err
 		}
-		scriptPath = written
+		scriptPath = obsScriptPath(written)
 	}
 	report.ScriptPath = scriptPath
 
@@ -197,26 +216,40 @@ func installInto(scenesDir, scriptDir string, opts Options) (Report, error) {
 // wouldChange answers the dry run by doing the edit on a temporary copy.
 // Predicting it separately would mean two implementations that can disagree.
 func wouldChange(collectionPath, scriptPath string, remove bool) (bool, error) {
+	// Every error here names the real collection, never the temporary copy.
+	// AddScript/RemoveScript report against the path they were given, which on
+	// this path is a file in the temp directory that means nothing to the
+	// operator -- the same gap installInto's write path already closed.
+	fail := func(err error) (bool, error) {
+		return false, fmt.Errorf("%s: %w", collectionPath, err)
+	}
+
 	raw, err := os.ReadFile(collectionPath)
 	if err != nil {
-		return false, err
+		return fail(err)
 	}
 	temp, err := os.CreateTemp("", "agentic-obs-dryrun-*.json")
 	if err != nil {
-		return false, err
+		return fail(err)
 	}
 	defer os.Remove(temp.Name())
 
 	if _, err := temp.Write(raw); err != nil {
 		temp.Close()
-		return false, err
+		return fail(err)
 	}
 	temp.Close()
 
+	var changed bool
 	if remove {
-		return RemoveScript(temp.Name(), scriptPath)
+		changed, err = RemoveScript(temp.Name(), scriptPath)
+	} else {
+		changed, err = AddScript(temp.Name(), scriptPath)
 	}
-	return AddScript(temp.Name(), scriptPath)
+	if err != nil {
+		return fail(err)
+	}
+	return changed, nil
 }
 
 // findCollections lists the scene collection files to operate on. Backups this

@@ -1,6 +1,7 @@
 package install
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -219,5 +220,105 @@ func TestInstallErrorNamesTheFailingCollection(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), bad) {
 		t.Errorf("error %q does not name the failing collection %s", err.Error(), bad)
+	}
+}
+
+// OBS's Lua loader splits a script path on '/' only -- obs_lua_script_create
+// in shared/obs-scripting/obs-scripting-lua.c. The Python backend normalises
+// backslashes; the Lua one does not. On Windows filepath.Join produced
+// backslashes, so the collection got a path OBS cannot parse.
+func TestObsScriptPathUsesForwardSlashes(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{`C:\Users\someone\AppData\Roaming\agentic-obs\bridge\agentic-obs-bridge.lua`,
+			"C:/Users/someone/AppData/Roaming/agentic-obs/bridge/agentic-obs-bridge.lua"},
+		{"/home/someone/.local/share/agentic-obs/bridge/agentic-obs-bridge.lua",
+			"/home/someone/.local/share/agentic-obs/bridge/agentic-obs-bridge.lua"},
+		{"C:/already/forward/agentic-obs-bridge.lua",
+			"C:/already/forward/agentic-obs-bridge.lua"},
+	}
+	for _, tc := range cases {
+		if got := obsScriptPath(tc.in); got != tc.want {
+			t.Errorf("obsScriptPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// The path installInto writes into a collection must carry no backslash, on
+// any platform. Every other test in this package uses forward-slash literals,
+// so none of them could see this.
+func TestInstallWritesAForwardSlashPathIntoTheCollection(t *testing.T) {
+	scenes := t.TempDir()
+	collection := filepath.Join(scenes, "Test.json")
+	if err := os.WriteFile(collection, []byte(`{"name":"Test"}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	report, err := installInto(scenes, t.TempDir(), Options{All: true})
+	if err != nil {
+		t.Fatalf("installInto: %v", err)
+	}
+	if strings.ContainsRune(report.ScriptPath, '\\') {
+		t.Errorf("report.ScriptPath %q holds a backslash", report.ScriptPath)
+	}
+
+	scripts := readScripts(t, collection)
+	if len(scripts) != 1 {
+		t.Fatalf("collection holds %d scripts, want 1", len(scripts))
+	}
+	if strings.ContainsRune(scripts[0], '\\') {
+		t.Errorf("the collection holds %q, which OBS's Lua loader cannot parse", scripts[0])
+	}
+}
+
+// The concrete failure the slash mismatch caused: OBS's own Scripts dialog
+// writes forward slashes, so a user who added the bridge by hand and then ran
+// install-bridge failed the exact-string idempotency check and got a SECOND
+// entry for the same file -- the bridge loaded twice, two sources named
+// agentic-obs-inbox, only one of them addressable.
+func TestInstallIsIdempotentAgainstAHandAddedEntry(t *testing.T) {
+	scenes := t.TempDir()
+	scriptDir := t.TempDir()
+	handAdded := strings.ReplaceAll(filepath.Join(scriptDir, scriptName), `\`, "/")
+
+	collection := filepath.Join(scenes, "Test.json")
+	doc := fmt.Sprintf(`{"name":"Test","modules":{"scripts-tool":[{"path":%q,"settings":{}}]}}`, handAdded)
+	if err := os.WriteFile(collection, []byte(doc), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	report, err := installInto(scenes, scriptDir, Options{All: true})
+	if err != nil {
+		t.Fatalf("installInto: %v", err)
+	}
+	if len(report.Changed) != 0 {
+		t.Errorf("install changed %v, want nothing: the entry was already there", report.Changed)
+	}
+
+	scripts := readScripts(t, collection)
+	if len(scripts) != 1 {
+		t.Fatalf("collection holds %d entries for one file: %v", len(scripts), scripts)
+	}
+}
+
+// A dry run's errors must name the collection, not the temporary copy it works
+// on -- the same gap the write path already closed.
+func TestDryRunErrorNamesTheCollection(t *testing.T) {
+	scenes := t.TempDir()
+	bad := filepath.Join(scenes, "Bad.json")
+	if err := os.WriteFile(bad, []byte(`{"name":"Bad","modules":{"scripts-tool":"not an array"}}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := installInto(scenes, t.TempDir(), Options{All: true, DryRun: true})
+	if err == nil {
+		t.Fatal("a dry run over a broken collection reported success")
+	}
+	if !strings.Contains(err.Error(), bad) {
+		t.Errorf("error %q does not name the collection %s", err.Error(), bad)
+	}
+	if strings.Contains(err.Error(), "agentic-obs-dryrun-") {
+		t.Errorf("error %q names the temporary copy instead of the collection", err.Error())
 	}
 }

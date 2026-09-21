@@ -103,13 +103,25 @@ func writeCollection(path string, doc map[string]interface{}) error {
 	return nil
 }
 
-// scriptList returns the existing entries. If scripts-tool is present but not
-// an array (and not null), it returns an error rather than silently discarding
-// the value. Null is treated as absent (empty list).
+// scriptList returns the existing entries. If modules or scripts-tool is
+// present but not the type it should be (and not null), it returns an error
+// rather than silently discarding the value. Null is treated as absent (empty
+// list).
 func scriptList(doc map[string]interface{}) ([]interface{}, error) {
-	modules, _ := doc["modules"].(map[string]interface{})
-	if modules == nil {
+	modulesValue, hasModules := doc["modules"]
+	// Missing or null: there is nothing to preserve, and setScriptList will
+	// create the object.
+	if !hasModules || modulesValue == nil {
 		return nil, nil
+	}
+
+	// Present but not an object. Falling through here would hand
+	// setScriptList a nil map, which replaces whatever this was with a fresh
+	// object -- the same silent data loss already refused one level down for
+	// scripts-tool.
+	modules, ok := modulesValue.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("modules must be an object, got %T", modulesValue)
 	}
 
 	scriptsTool, exists := modules[scriptsKey]

@@ -202,6 +202,54 @@ func TestAddScriptRejectsNonArrayScriptsTool(t *testing.T) {
 	}
 }
 
+// The same defect the case above already refuses one level down. Falling
+// through on a non-object "modules" handed setScriptList a nil map, which
+// replaced whatever was there with a fresh object -- silently discarding it.
+func TestAddScriptRejectsNonObjectModules(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad-modules.json")
+	if err := os.WriteFile(path, []byte(`{
+		"name": "Bad",
+		"modules": "not an object"
+	}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	changed, err := AddScript(path, "C:/agentic-obs/bridge.lua")
+	if err == nil {
+		t.Fatal("AddScript should error on a non-object modules, got nil")
+	}
+	if changed {
+		t.Error("changed should be false on error")
+	}
+
+	original, _ := os.ReadFile(path)
+	if !strings.Contains(string(original), `"modules": "not an object"`) {
+		t.Errorf("the value was discarded rather than preserved:\n%s", original)
+	}
+}
+
+// Null modules is absent, not broken: there is nothing to lose, and
+// setScriptList creates the object.
+func TestAddScriptHandlesNullModules(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "null-modules.json")
+	if err := os.WriteFile(path, []byte(`{"name":"NullModules","modules":null}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	changed, err := AddScript(path, "C:/agentic-obs/bridge.lua")
+	if err != nil {
+		t.Fatalf("AddScript on null modules: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed should be true")
+	}
+
+	scripts := readScripts(t, path)
+	if len(scripts) != 1 || scripts[0] != "C:/agentic-obs/bridge.lua" {
+		t.Fatalf("got %v, want [C:/agentic-obs/bridge.lua]", scripts)
+	}
+}
+
 func TestAddScriptHandlesNullDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "null.json")
 	if err := os.WriteFile(path, []byte(`null`), 0o644); err != nil {
