@@ -27,6 +27,7 @@ var allEventTypes = []EventType{
 	EventTypeVirtualCamStopped,
 	EventTypeReplayBufferSaved,
 	EventTypeInputMuteChanged,
+	EventTypeInputSettingsChanged,
 	EventTypeSourceVisibilityChanged,
 	EventTypeTransitionStarted,
 	EventTypeStudioModeChanged,

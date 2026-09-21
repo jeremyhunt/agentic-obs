@@ -47,6 +47,11 @@ const (
 	// Input events
 	EventTypeInputMuteChanged EventType = "input_mute_changed"
 
+	// EventTypeInputSettingsChanged reports an input's settings being replaced,
+	// including by a write made inside OBS. The Lua bridge's replies arrive
+	// this way.
+	EventTypeInputSettingsChanged EventType = "input_settings_changed"
+
 	// Scene item events
 	EventTypeSourceVisibilityChanged EventType = "source_visibility_changed"
 

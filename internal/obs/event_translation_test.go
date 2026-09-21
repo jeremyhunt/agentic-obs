@@ -205,3 +205,34 @@ func TestRecordStateChangedIgnoresIntermediateStates(t *testing.T) {
 		}
 	}
 }
+
+func TestEventFromInputSettingsChanged(t *testing.T) {
+	at := time.Now()
+	raw := &events.InputSettingsChanged{
+		InputName:     "agentic-obs-mailbox",
+		InputUuid:     "uuid-1",
+		InputSettings: map[string]any{"id": "abc", "ok": true},
+	}
+
+	got, ok := eventFrom(raw, at)
+	if !ok {
+		t.Fatal("eventFrom did not recognise InputSettingsChanged")
+	}
+	if got.Type != EventTypeInputSettingsChanged {
+		t.Errorf("Type = %q, want %q", got.Type, EventTypeInputSettingsChanged)
+	}
+	if got.Payload["input_name"] != "agentic-obs-mailbox" {
+		t.Errorf("input_name = %v", got.Payload["input_name"])
+	}
+	if got.Payload["input_uuid"] != "uuid-1" {
+		t.Errorf("input_uuid = %v", got.Payload["input_uuid"])
+	}
+
+	settings, isMap := got.Payload["settings"].(map[string]interface{})
+	if !isMap {
+		t.Fatalf("settings is %T, want a map", got.Payload["settings"])
+	}
+	if settings["id"] != "abc" {
+		t.Errorf("settings[id] = %v, want abc", settings["id"])
+	}
+}

@@ -117,6 +117,13 @@ func eventFrom(raw any, at time.Time) (Event, bool) {
 			"input_name": e.InputName, "muted": e.InputMuted,
 		})
 
+	case *events.InputSettingsChanged:
+		return ev(EventTypeInputSettingsChanged, map[string]interface{}{
+			"input_name": e.InputName,
+			"input_uuid": e.InputUuid,
+			"settings":   map[string]interface{}(e.InputSettings),
+		})
+
 	// Scene item events
 	case *events.SceneItemEnableStateChanged:
 		return ev(EventTypeSourceVisibilityChanged, map[string]interface{}{
