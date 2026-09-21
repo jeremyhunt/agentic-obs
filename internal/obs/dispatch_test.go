@@ -116,6 +116,52 @@ func TestOrdinaryRequestsAreNotRefused(t *testing.T) {
 // reserved name, so no uuid resolves to one.
 func noTransport() (map[string]string, error) { return map[string]string{}, nil }
 
+// TestEverySourceAddressingFieldMatchesTheKeyRule is what turns "the key rule is
+// broad" into "the key rule is exhaustive for this dependency".
+//
+// CallRequest marshals request_data into goobs' generated params struct, and
+// unknown fields are dropped there -- so the fields a caller can actually
+// address anything through are exactly the ones goobs declares. Every one of
+// them that mentions a name or a uuid is spelled *Name or *Uuid today, which is
+// why addressesSource can be a suffix test rather than a table.
+//
+// That is a fact about goobs 1.8.3, not a law, so it is asserted over the whole
+// generated surface instead of being trusted. A future goobs that adds
+// sourceNames or inputNameList fails here, loudly, rather than leaving the
+// guard quietly blind to it.
+func TestEverySourceAddressingFieldMatchesTheKeyRule(t *testing.T) {
+	reg := newRequestRegistry()
+	checked := 0
+
+	for request, entry := range reg.entries {
+		for i := 0; i < entry.params.NumField(); i++ {
+			field := entry.params.Field(i)
+			key := strings.Split(field.Tag.Get("json"), ",")[0]
+			if key == "" || key == "-" {
+				continue
+			}
+			checked++
+
+			lower := strings.ToLower(key)
+			mentions := strings.Contains(lower, "name") || strings.Contains(lower, "uuid")
+			if _, addresses := addressesSource(key); mentions != addresses {
+				t.Errorf("%s.%s: the field mentions a name or uuid but addressesSource says %v -- "+
+					"goobs has introduced a spelling the guard's key rule does not match",
+					request, key, addresses)
+			}
+		}
+	}
+
+	// goobs 1.8.3 declares exactly 300 tagged params fields across the 147
+	// requests. A sharp lower bound for the same reason the registry test has
+	// one: reflection that stopped finding fields would make this test pass by
+	// inspecting nothing, which is the failure mode worth catching.
+	if checked < 300 {
+		t.Errorf("only %d params fields were inspected; the generated surface is much larger "+
+			"than that, so this test is not looking at what it claims to", checked)
+	}
+}
+
 func TestPassthroughRefusesRequestsAimedAtTheBridgeTransport(t *testing.T) {
 	for _, name := range []string{BridgeInboxSource, BridgeMailboxSource} {
 		for _, tc := range []struct {
@@ -317,6 +363,53 @@ func TestPassthroughResolvesUUIDsOnlyWhenTheyAreUsed(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Errorf("the transport uuids were resolved %d times for payloads that address nothing by uuid", calls)
+	}
+}
+
+func TestPassthroughReadsPluralAndListAddressingKeys(t *testing.T) {
+	// goobs declares no plural addressing field today, so this covers a shape
+	// rather than a request -- cheap insurance so that a future sourceNames is
+	// caught by the guard as well as reported by
+	// TestEverySourceAddressingFieldMatchesTheKeyRule.
+	for _, data := range []map[string]interface{}{
+		{"sourceNames": []interface{}{"Webcam", BridgeInboxSource}},
+		{"inputUuids": []interface{}{"11111111-2222-3333-4444-555555555555"}},
+	} {
+		resolved := func() (map[string]string, error) {
+			return map[string]string{"11111111-2222-3333-4444-555555555555": BridgeMailboxSource}, nil
+		}
+		if err := checkRequestAllowed("SetSomethingPlural", data, resolved); err == nil {
+			t.Errorf("a reserved name in a list under %v was not seen", data)
+		}
+	}
+}
+
+func TestCallRequestOnADisconnectedClientSaysSo(t *testing.T) {
+	// A uuid-bearing payload used to make the disconnected case report that the
+	// bridge's uuids were unresolvable, which is a confusing answer to "OBS is
+	// not running". No connection is no transport, not a failed lookup -- and
+	// canvasUuid is declared on thirty-odd params types, so this is an ordinary
+	// call rather than an exotic one.
+	_, err := (&Client{}).CallRequest("SetSceneItemEnabled", map[string]interface{}{
+		"sceneName":        "Game",
+		"canvasUuid":       "11111111-2222-3333-4444-555555555555",
+		"sceneItemId":      3,
+		"sceneItemEnabled": true,
+	})
+	if err == nil {
+		t.Fatal("expected an error from a disconnected client")
+	}
+	if !strings.Contains(err.Error(), "not connected to OBS") {
+		t.Errorf("a disconnected client should say so, said: %v", err)
+	}
+
+	// The reservation still wins over the connection message, because it is
+	// about the request rather than about OBS's availability.
+	_, err = (&Client{}).CallRequest("SetInputSettings", map[string]interface{}{
+		"inputName": BridgeInboxSource,
+	})
+	if err == nil || !strings.Contains(err.Error(), "run_lua_in_obs") {
+		t.Errorf("a name-addressed refusal should not depend on the connection, said: %v", err)
 	}
 }
 

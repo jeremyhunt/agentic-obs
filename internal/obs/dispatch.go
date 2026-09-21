@@ -182,8 +182,10 @@ var deniedRequests = map[string]string{
 //
 // transportUUIDs resolves the reserved names to the uuids OBS currently holds
 // for them. It is a function rather than a value because it costs a round trip
-// and is only ever needed for the rare payload that addresses a source by uuid;
-// it is not called at all otherwise.
+// and is needed only for a payload that addresses something by uuid; it is not
+// called at all otherwise. That is not the same as rare -- goobs declares an
+// optional canvasUuid on thirty-odd params types -- so "only when asked" is the
+// property being claimed here, not "almost never".
 func checkRequestAllowed(requestType string, requestData map[string]interface{}, transportUUIDs func() (map[string]string, error)) error {
 	if wrapper, denied := deniedRequests[requestType]; denied {
 		if wrapper == "" {
@@ -294,13 +296,35 @@ type sourceRef struct {
 	uuid bool
 }
 
+// addressesSource classifies a payload key by its shape: does a string under it
+// name or identify an OBS object?
+//
+// Singular and plural, because a field this rule misses is a field the guard
+// cannot see at all. Every source-addressing field goobs 1.8.3 declares is
+// spelled *Name or *Uuid -- TestEverySourceAddressingFieldMatchesTheKeyRule
+// asserts that over the whole generated surface rather than trusting it -- and
+// the plural forms cost two comparisons to cover a shape a future goobs could
+// introduce. A field spelled some third way (inputNameList) would still be
+// missed, and that test is what would say so.
+func addressesSource(key string) (uuid, ok bool) {
+	lower := strings.ToLower(key)
+	switch {
+	case strings.HasSuffix(lower, "name"), strings.HasSuffix(lower, "names"):
+		return false, true
+	case strings.HasSuffix(lower, "uuid"), strings.HasSuffix(lower, "uuids"):
+		return true, true
+	}
+	return false, false
+}
+
 // sourceRefsIn collects the payload values that address a source, by key shape.
 //
-// It descends into nested objects and arrays. Nothing in obs-websocket 5.x
-// addresses a source from inside a nested object today -- request payloads are
-// flat where addressing is concerned -- so this buys nothing against the
-// protocol as it stands and costs nothing either: a nested key would have to
-// both end in Name or Uuid and hold a reserved value to be caught.
+// It descends into nested objects and arrays, and reads strings out of an array
+// under an addressing key. Nothing in obs-websocket 5.x addresses a source from
+// inside a nested object or as a list -- request payloads are flat where
+// addressing is concerned -- so this buys nothing against the protocol as it
+// stands and costs nothing either: such a value would have to sit under a
+// Name/Uuid key AND hold a reserved name to be caught.
 //
 // Results are sorted so a payload with two matching refs refuses with the same
 // message every time; Go's map iteration order is otherwise random.
@@ -310,21 +334,23 @@ func sourceRefsIn(requestData map[string]interface{}) []sourceRef {
 	var walk func(m map[string]interface{})
 	walk = func(m map[string]interface{}) {
 		for key, value := range m {
+			isUUID, addresses := addressesSource(key)
 			switch typed := value.(type) {
 			case string:
-				lower := strings.ToLower(key)
-				switch {
-				case strings.HasSuffix(lower, "name"):
-					refs = append(refs, sourceRef{field: key, value: typed})
-				case strings.HasSuffix(lower, "uuid"):
-					refs = append(refs, sourceRef{field: key, value: typed, uuid: true})
+				if addresses {
+					refs = append(refs, sourceRef{field: key, value: typed, uuid: isUUID})
 				}
 			case map[string]interface{}:
 				walk(typed)
 			case []interface{}:
 				for _, element := range typed {
-					if nested, ok := element.(map[string]interface{}); ok {
+					switch nested := element.(type) {
+					case map[string]interface{}:
 						walk(nested)
+					case string:
+						if addresses {
+							refs = append(refs, sourceRef{field: key, value: nested, uuid: isUUID})
+						}
 					}
 				}
 			}
@@ -344,8 +370,20 @@ func sourceRefsIn(requestData map[string]interface{}) []sourceRef {
 // bridgeTransportUUIDs maps the uuid OBS currently holds for each reserved
 // transport source back to its name. Empty when the bridge is not installed.
 func (c *Client) bridgeTransportUUIDs() (map[string]string, error) {
+	if _, err := c.getClient(); err != nil {
+		// No connection is no transport, not a failed lookup. There is no OBS
+		// holding a source to protect, and the request is about to fail at this
+		// same check a few lines later -- with "not connected to OBS", which is
+		// what the caller needs to read, rather than a confusing one about the
+		// Lua bridge's uuids being unresolvable.
+		return map[string]string{}, nil
+	}
+
 	inputs, err := c.ListSources()
 	if err != nil {
+		// Connected and the list failed: fail closed, in checkRequestAllowed.
+		// Not knowing the transport's uuids means not knowing that this request
+		// misses them.
 		return nil, err
 	}
 
