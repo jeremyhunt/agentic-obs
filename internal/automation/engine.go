@@ -46,6 +46,10 @@ type AutomationEngine struct {
 	// with a fake so they can advance past a deadline instead of sleeping
 	// through it. (FB-56)
 	clock clock
+
+	// suppressor tells the engine's own writes apart from changes somebody else
+	// made, so a rule that reacts to what it does cannot feed itself. (FB-85)
+	suppressor *writeSuppressor
 }
 
 // NewAutomationEngine creates a new automation engine.
@@ -57,6 +61,7 @@ func NewAutomationEngine(db *storage.DB, obsClient OBSClient) *AutomationEngine 
 		cancel:                 cancel,
 		storage:                db,
 		executor:               NewExecutor(obsClient),
+		suppressor:             newWriteSuppressor(realClock{}, suppressTTL),
 		rules:                  make(map[int64]*Rule),
 		cooldowns:              make(map[int64]time.Time),
 		eventChan:              make(chan EventPayload, 100),
@@ -65,7 +70,27 @@ func NewAutomationEngine(db *storage.DB, obsClient OBSClient) *AutomationEngine 
 		clock:                  realClock{},
 	}
 
+	// The executor records what it writes; the dispatcher reads those records.
+	// They have to be the same suppressor or neither half does anything.
+	engine.executor.useSuppressor(engine.suppressor)
+
 	return engine
+}
+
+// setClock replaces the engine's source of time, including the suppressor's.
+//
+// Both have to move together. The suppressor expires entries on a deadline, so
+// an engine running on a fake clock with a suppressor still on the real one has
+// two notions of now -- which is the exact condition the clock seam exists to
+// prevent, reintroduced one field at a time.
+func (e *AutomationEngine) setClock(c clock) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.clock = c
+	if e.suppressor != nil {
+		e.suppressor.setClock(c)
+	}
 }
 
 // Start loads rules and begins processing events.
@@ -308,6 +333,19 @@ func (e *AutomationEngine) processEvents() {
 // the same rule. Because cooldown check + record must be atomic, the match
 // loop runs under a write lock.
 func (e *AutomationEngine) dispatchEvent(payload EventPayload) {
+	// Our own echo, dropped before any rule sees it.
+	//
+	// This is ahead of the rule loop rather than inside it because the event is
+	// not ours "for this rule" -- it is ours, full stop, and a second rule
+	// watching the same event would otherwise pick up what the first one caused.
+	// Cooldown cannot do this job: it is off by default, and when on it throttles
+	// genuine events just as hard, because it counts rather than identifies.
+	if key, keyed := keyForEvent(payload); keyed && e.suppressor.Consume(key) {
+		log.Printf("[Automation] Ignoring %s: it is the echo of our own write",
+			payload.EventType)
+		return
+	}
+
 	e.mu.Lock()
 
 	// Find matching rules, recording cooldown atomically for each match.

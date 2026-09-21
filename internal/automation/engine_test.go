@@ -420,7 +420,7 @@ func TestEngineCooldown(t *testing.T) {
 	// 500ms cooldown, which races the boundary -- that is FB-37, the intermittent
 	// failure at -count>=3. (FB-56)
 	clk := newFakeClock()
-	engine.clock = clk
+	engine.setClock(clk)
 
 	err = engine.Start()
 	require.NoError(t, err)

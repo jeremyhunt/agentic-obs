@@ -15,6 +15,7 @@ This directory documents significant architectural decisions for the agentic-obs
 | [007](007-web-ui-interfaces.md) | Web UI Interface Pattern | Accepted | 2025-12-18 |
 | [008](008-mcp-apps-port.md) | MCP Apps Spec Port (FB-32) | Proposed | 2026-04-18 |
 | [009](009-advanced-scene-switcher.md) | Advanced Scene Switcher Tool Group (FB-51) | Accepted | 2026-05-28 |
+| [010](010-self-write-suppression.md) | Self-Write Suppression in the Automation Engine (FB-85) | Accepted | 2026-09-21 |
 
 ## ADR Template
 
