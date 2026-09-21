@@ -551,12 +551,16 @@ func (s *Server) handleOBSEventNotification(eventType obs.EventType, data map[st
 
 // notBridgeTraffic rejects settings events for the bridge's two transport
 // sources.
+//
+// Through the same predicate as every other guard site rather than comparing
+// the constants here: one spelling of the test, so a change to what counts as
+// the transport cannot reach four places and miss the fifth.
 func notBridgeTraffic(e obs.Event) bool {
 	if e.Type != obs.EventTypeInputSettingsChanged {
 		return true
 	}
 	name, _ := e.Payload["input_name"].(string)
-	return name != bridge.InboxSource && name != bridge.MailboxSource
+	return !isBridgeTransport(name)
 }
 
 // GetOBSClient returns the OBS client instance (for internal use)

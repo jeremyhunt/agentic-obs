@@ -22,7 +22,25 @@ const (
 // in place, create meaning create and ensure meaning ensure is the clearer pair,
 // and silently turning a create into a write is the more expensive default to
 // get wrong. (FB-72)
-func (s *Server) createTypedSource(sceneName, sourceName, kind string, settings map[string]interface{}, ifExists string) (string, int, error) {
+//
+// tool names the caller for the refusal below. It is a parameter rather than a
+// literal because the guard belongs here, once, for the same reason the policy
+// does: five copies is five chances to forget one.
+func (s *Server) createTypedSource(tool, sceneName, sourceName, kind string, settings map[string]interface{}, ifExists string) (string, int, error) {
+	// Before if_exists is even validated, because every branch below reaches
+	// the Lua bridge's transport and the dangerous one does not look dangerous.
+	// if_exists=update ends in s.ensureInput, the unexported worker, which
+	// carries no guard of its own -- only handleEnsureInput does. And the kind
+	// check above it does not stop the caller: the inbox really is a
+	// color_source_v3, which is what the bridge's Lua creates, so
+	// create_color_source matches it exactly and falls straight through to the
+	// update path. With the bridge absent, the create branch plants a decoy
+	// that collides with the real transport the day it is installed. See
+	// bridge_reserved.go.
+	if isBridgeTransport(sourceName) {
+		return "", 0, errBridgeTransportWrite(tool, sourceName)
+	}
+
 	switch ifExists {
 	case "", ifExistsError, ifExistsUpdate, ifExistsSkip:
 	default:

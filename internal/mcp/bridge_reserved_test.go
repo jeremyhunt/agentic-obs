@@ -223,6 +223,135 @@ func TestReadingTheBridgeTransportIsNotRefused(t *testing.T) {
 	assert.NoError(t, err, "reads of the transport stay open")
 }
 
+// The typed create_* tools share one worker, and the guard belongs there rather
+// than in five handlers.
+//
+// The dangerous branch does not look dangerous. if_exists=update ends in
+// s.ensureInput -- the unexported worker, which carries no guard; only
+// handleEnsureInput does -- and the kind check above it does not stop anyone,
+// because the inbox really IS a color_source_v3: that is what the bridge's Lua
+// creates. So create_color_source matched the transport exactly and fell
+// through to place it in a live scene and write its settings, from a
+// default-enabled group.
+func TestCreateTypedSourceRefusesTheBridgeTransport(t *testing.T) {
+	t.Run("if_exists=update against the real transport", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		// Same kind the bridge's Lua uses, so the kind check cannot be what
+		// refuses this and the test is the real case.
+		_, err := mock.CreateInput("Scene 1", bridge.InboxSource, "color_source_v3", nil)
+		require.NoError(t, err)
+		before, err := mock.GetSceneByName("Gaming")
+		require.NoError(t, err)
+
+		_, _, err = server.handleCreateColorSource(context.Background(), nil, CreateColorSourceInput{
+			SceneName:  "Gaming",
+			SourceName: bridge.InboxSource,
+			Color:      0xFF000000,
+			IfExists:   "update",
+		})
+		require.Error(t, err, "create_color_source must not reach the transport")
+		assert.Contains(t, err.Error(), "run_lua_in_obs")
+		assert.Contains(t, err.Error(), "create_color_source", "the refusal must name the tool that was used")
+
+		after, err := mock.GetSceneByName("Gaming")
+		require.NoError(t, err)
+		assert.Equal(t, len(before.Sources), len(after.Sources),
+			"the transport was placed in a live scene before refusing")
+	})
+
+	t.Run("the create path plants no decoy", func(t *testing.T) {
+		// With the bridge absent the name is free, and taking it collides with
+		// the real transport the day install-bridge runs.
+		server, mock := testServer(t)
+
+		_, _, err := server.handleCreateTextSource(context.Background(), nil, CreateTextSourceInput{
+			SceneName:  "Gaming",
+			SourceName: bridge.MailboxSource,
+			Text:       "hello",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "run_lua_in_obs")
+
+		_, err = mock.GetSourceSettings(bridge.MailboxSource)
+		assert.Error(t, err, "a source was created under the reserved name")
+	})
+
+	t.Run("create_audio_input, which does not share that worker", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		_, _, err := server.handleCreateAudioInput(context.Background(), nil, CreateAudioInputInput{
+			SceneName:  "Gaming",
+			SourceName: bridge.InboxSource,
+			DeviceKind: "input",
+			DeviceID:   "default",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "run_lua_in_obs")
+
+		_, err = mock.GetSourceSettings(bridge.InboxSource)
+		assert.Error(t, err, "a source was created under the reserved name")
+	})
+
+	t.Run("ordinary sources are untouched", func(t *testing.T) {
+		server, mock := testServer(t)
+
+		_, _, err := server.handleCreateColorSource(context.Background(), nil, CreateColorSourceInput{
+			SceneName:  "Gaming",
+			SourceName: "agentic-obs-inbox-2",
+			Color:      0xFF000000,
+		})
+		require.NoError(t, err, "a name that merely resembles the transport is a user's own source")
+
+		_, err = mock.GetSourceSettings("agentic-obs-inbox-2")
+		assert.NoError(t, err)
+	})
+}
+
+// apply_scene_preset shares the reconciler, so it inherited the spec guard --
+// and refusing there would have been a pure false positive. The preset is
+// masked to fields=["enabled"], under which the only write available is
+// SetSceneItemEnabled on a placement OBS already holds: it provably cannot
+// write, create or place a source.
+//
+// Reachable in practice, which is why this is a test rather than a note: the
+// entries handleApplyScenePreset drops are the ones absent from the LIVE scene,
+// so a transport someone placed by hand is captured by save_scene_preset and
+// survives into the spec.
+func TestApplyScenePresetIsNotRefusedForNamingTheTransport(t *testing.T) {
+	server, mock, db := testServerWithStorage(t)
+
+	// Placed in the scene, the way a hand-edited collection would leave it.
+	_, err := mock.CreateInput("Scene 1", bridge.InboxSource, "color_source_v3", nil)
+	require.NoError(t, err)
+
+	// Captured, rather than hand-written, so the whole chain is under test.
+	_, _, err = server.handleSaveScenePreset(context.Background(), nil, SavePresetInput{
+		PresetName: "All on",
+		SceneName:  "Scene 1",
+	})
+	require.NoError(t, err)
+
+	preset, err := db.GetScenePreset(context.Background(), "All on")
+	require.NoError(t, err)
+	named := false
+	for _, src := range preset.Sources {
+		if src.Name == bridge.InboxSource {
+			named = true
+		}
+	}
+	require.True(t, named, "the preset does not name the transport, so this test proves nothing")
+
+	_, _, err = server.handleApplyScenePreset(context.Background(), nil,
+		ApplyPresetInput{PresetName: "All on"})
+	require.NoError(t, err, "a visibility-only preset cannot reach a source and must not be refused")
+
+	// And it still cannot have written the transport's settings.
+	settings, err := mock.GetSourceSettings(bridge.InboxSource)
+	require.NoError(t, err)
+	assert.NotContains(t, settings, "lua")
+}
+
 // apply_scene_spec was the second of the two routes ADR-013 recorded as open.
 // The guard is in scenespec.Apply rather than in this handler, so every caller
 // of the reconciler inherits it; these tests pin that the tool surfaces it.

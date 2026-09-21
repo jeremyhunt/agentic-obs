@@ -1798,6 +1798,14 @@ func (s *Server) handleCreateAudioInput(ctx context.Context, request *mcpsdk.Cal
 	if input.DeviceID == "" {
 		return nil, nil, fmt.Errorf("device_id must not be empty; use 'default' for the system default device")
 	}
+	// This one does not go through createTypedSource, so it needs the
+	// reservation of its own. With the bridge installed OBS would refuse the
+	// name anyway; with it absent this plants a decoy that collides with the
+	// real transport the day it is installed.
+	if isBridgeTransport(input.SourceName) {
+		s.recordAction("create_audio_input", "Create audio input", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportWrite("create_audio_input", input.SourceName)
+	}
 
 	var inputKind string
 	switch input.DeviceKind {
@@ -2182,7 +2190,7 @@ func (s *Server) handleCreateTextSource(ctx context.Context, request *mcpsdk.Cal
 	}
 
 	// Create the input using the generic method
-	action, sceneItemID, err := s.createTypedSource(
+	action, sceneItemID, err := s.createTypedSource("create_text_source",
 		input.SceneName, input.SourceName, "text_gdiplus_v3", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_text_source", "Create text source", input, nil, false, time.Since(start))
@@ -2209,7 +2217,7 @@ func (s *Server) handleCreateImageSource(ctx context.Context, request *mcpsdk.Ca
 		"file": input.FilePath,
 	}
 
-	action, sceneItemID, err := s.createTypedSource(
+	action, sceneItemID, err := s.createTypedSource("create_image_source",
 		input.SceneName, input.SourceName, "image_source", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_image_source", "Create image source", input, nil, false, time.Since(start))
@@ -2249,7 +2257,7 @@ func (s *Server) handleCreateColorSource(ctx context.Context, request *mcpsdk.Ca
 		"height": height,
 	}
 
-	action, sceneItemID, err := s.createTypedSource(
+	action, sceneItemID, err := s.createTypedSource("create_color_source",
 		input.SceneName, input.SourceName, "color_source_v3", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_color_source", "Create color source", input, nil, false, time.Since(start))
@@ -2311,7 +2319,7 @@ func (s *Server) handleCreateBrowserSource(ctx context.Context, request *mcpsdk.
 		settings["restart_when_active"] = *input.RestartWhenActive
 	}
 
-	action, sceneItemID, err := s.createTypedSource(
+	action, sceneItemID, err := s.createTypedSource("create_browser_source",
 		input.SceneName, input.SourceName, "browser_source", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_browser_source", "Create browser source", input, nil, false, time.Since(start))
@@ -2344,7 +2352,7 @@ func (s *Server) handleCreateMediaSource(ctx context.Context, request *mcpsdk.Ca
 		"clear_on_end": false,
 	}
 
-	action, sceneItemID, err := s.createTypedSource(
+	action, sceneItemID, err := s.createTypedSource("create_media_source",
 		input.SceneName, input.SourceName, "ffmpeg_source", settings, input.IfExists)
 	if err != nil {
 		s.recordAction("create_media_source", "Create media source", input, nil, false, time.Since(start))
