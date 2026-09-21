@@ -62,10 +62,21 @@ writes an arbitrary settings map to an arbitrary source is a second way in:
 reserved against the general-purpose tools
 (`internal/mcp/bridge_reserved.go`).
 
-Stated accurately: the default binary contains no *unreviewed* eval path, and
-the transport's source names are reserved so no general-purpose tool reaches
-the bridge. Neither is a boundary against whoever holds the obs-websocket
-password, who can load their own script.
+Stated accurately, and no more than that: the default binary contains no
+*unreviewed* eval path, and the transport's source names are reserved against
+the four tools that address a source by name and write it —
+`set_source_settings`, `ensure_input`, `remove_source`, `duplicate_source`.
+
+**Two routes to the transport are still open, deliberately named here rather
+than left to be rediscovered.** `call_obs_request` is a raw obs-websocket
+passthrough (Core group, default-enabled, not elicited) and will issue
+`SetInputSettings` against any source, and `apply_scene_spec` writes the
+settings of any source a caller-supplied spec names, with `dry_run=false`.
+Closing either means deciding what a deliberately unrestricted escape hatch is
+allowed to reach, which is a design question this section does not settle.
+
+None of it is a boundary against whoever holds the obs-websocket password, who
+can write those settings directly or load their own script.
 
 The runtime gate is the env var `AGENTIC_OBS_SCRIPTING=1`, deliberately *not* a
 value in SQLite: tool configuration lives there and `set_tool_config` can write

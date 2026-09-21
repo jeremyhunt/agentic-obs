@@ -23,6 +23,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stay open — they expose nothing `get_obs_status`'s `bridge` field does not
   already report.
 
+  `call_obs_request` and `apply_scene_spec` can still write the transport: the
+  first is a deliberately unrestricted obs-websocket passthrough, the second
+  writes whatever source a caller-supplied spec names. Both are recorded in
+  ADR-013 rather than closed here.
+
 - **A preset could not express a source placed twice in one scene (FB-93)** —
   `apply_scene_preset` built a name-to-id map, so a scene holding the same source
   twice produced two preset entries under one name and both landed on whichever
@@ -63,7 +68,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The build tag is not the whole gate on its own: the transport is addressed by
   source name, so the two names are reserved separately (see Fixed, above).
   Accurately stated, the default binary contains no unreviewed eval path, and
-  no general-purpose tool reaches the transport.
+  the four tools that address a source by name and write it will not touch the
+  transport. `call_obs_request` and `apply_scene_spec` still can — see
+  [ADR-013](design/decisions/013-the-lua-bridge.md), decision 6.
 
 - **`apply_scene_preset` takes `dry_run` (FB-93)** — defaulting to **false**,
   unlike `apply_scene_spec`. A preset changes visibility and nothing else and is

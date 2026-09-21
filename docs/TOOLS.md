@@ -3050,3 +3050,8 @@ refused by `set_source_settings`, `ensure_input`, `remove_source` and
 `duplicate_source` in every build. Writing the first is running Lua; removing
 either breaks the bridge. Reads are unaffected. Use `agentic-obs
 uninstall-bridge` to take the bridge out.
+
+`call_obs_request` and `apply_scene_spec` are not guarded: the first is a raw
+obs-websocket passthrough by design, the second writes whatever source a
+caller-supplied spec names. The reservation reduces what a mistake reaches; it
+does not make the transport unreachable.

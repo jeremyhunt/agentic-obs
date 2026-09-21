@@ -25,6 +25,14 @@ import (
 //
 // Reads (get_source_settings, list_sources) are deliberately left alone. They
 // expose nothing that get_obs_status's bridge field does not already report.
+//
+// This does NOT make the transport unreachable, and should not be read as if
+// it did. Two tools still write a source by name and are not guarded here:
+// call_obs_request, a raw obs-websocket passthrough that will issue
+// SetInputSettings against anything, and apply_scene_spec, which writes
+// whatever source a caller-supplied spec names. Guarding either means deciding
+// what a deliberately unrestricted escape hatch may reach -- a design question,
+// recorded in ADR-013 decision 6 rather than answered here.
 
 // isBridgeTransport reports whether name is one of the bridge's two transport
 // sources. It compares against the constants so a rename in internal/bridge

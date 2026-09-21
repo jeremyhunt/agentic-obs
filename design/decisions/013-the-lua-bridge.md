@@ -162,9 +162,17 @@ tools — `set_source_settings`, `ensure_input`, `remove_source`,
 Reads stay open: they expose nothing `get_obs_status`'s `bridge` field does not
 already report.
 
-This closes the bypass through this server's own tools. It is not a boundary
-against whoever holds the obs-websocket password, who can write those settings
-directly.
+**Two routes are still open, and are named here rather than left implicit.**
+`call_obs_request` is a raw obs-websocket passthrough — Core group,
+default-enabled, not elicited — and will issue `SetInputSettings` against any
+source; `apply_scene_spec` writes the settings of any source a caller-supplied
+spec names, once `dry_run=false`. Closing either means deciding what a
+deliberately unrestricted escape hatch may reach, which ADR-012 settled the
+other way and this ADR does not reopen. So the reservation reduces what a
+mistake reaches; it does not make the transport unreachable.
+
+None of it is a boundary against whoever holds the obs-websocket password, who
+can write those settings directly.
 
 ## Alternatives rejected
 
