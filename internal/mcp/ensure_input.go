@@ -54,6 +54,18 @@ func (s *Server) handleEnsureInput(ctx context.Context, request *mcpsdk.CallTool
 		return nil, nil, err
 	}
 
+	// Before anything is looked up, because all three of this handler's paths
+	// touch the transport and only one of them ends in a settings write. The
+	// transport's sources belong to no scene, so findPlacement always reports
+	// them as not placed: a guard any further down would have OBS add the
+	// inbox to a live scene as a visible colour source and only then refuse --
+	// and with settings omitted it would not refuse at all. The create path
+	// would likewise let a caller plant a decoy that collides with the real
+	// transport the day the bridge is installed. See bridge_reserved.go.
+	if isBridgeTransport(input.SourceName) {
+		return fail(errBridgeTransportWrite("ensure_input", input.SourceName))
+	}
+
 	existing, err := s.findInput(input.SourceName)
 	if err != nil {
 		return fail(err)
@@ -156,13 +168,12 @@ func (s *Server) ensureInput(input EnsureInputInput, exists bool) (string, int, 
 	return "updated", sceneItemID, nil
 }
 
+// applySettings writes the input's settings.
+//
+// The bridge transport is refused in handleEnsureInput rather than here: this
+// is only one of three paths that reach the transport, and the guard has to sit
+// above all of them. Any new caller of this function needs that check first.
 func (s *Server) applySettings(input EnsureInputInput) error {
-	// The second general-purpose path to a settings write, and therefore the
-	// second way to reach the bridge's inbox by name. See bridge_reserved.go.
-	if isBridgeTransport(input.SourceName) {
-		return errBridgeTransportWrite("ensure_input", input.SourceName)
-	}
-
 	overlay := true
 	if input.Overlay != nil {
 		overlay = *input.Overlay

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ironystock/agentic-obs/internal/bridge"
+	"github.com/ironystock/agentic-obs/internal/mcp/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -84,28 +85,99 @@ func TestSetSourceSettingsStillWritesOrdinarySources(t *testing.T) {
 	assert.Equal(t, "1280x720", got["resolution"])
 }
 
-// ensure_input is the other path to the same write, through applySettings.
-func TestEnsureInputRefusesTheBridgeTransport(t *testing.T) {
-	server, mock := testServer(t)
+// ensure_input is the other path to the same write, and it has THREE paths of
+// its own: create, place-then-write, and write. Only the last ends in
+// applySettings, so a guard there let the other two run first -- the place
+// path adds the transport to a live scene as a visible colour source before
+// refusing, and with settings omitted it never refuses at all.
+//
+// The transport's sources belong to no scene in a real OBS. The fake mirrors
+// OBS's refcounting, where an input with no placement anywhere cannot exist,
+// so "in another scene" stands in for it: findPlacement reports both as not
+// placed in the target scene, which is the same branch.
+func TestEnsureInputRefusesTheBridgeTransportOnEveryPath(t *testing.T) {
+	sceneSourceCount := func(t *testing.T, mock *testutil.MockOBSClient, scene string) int {
+		t.Helper()
+		got, err := mock.GetSceneByName(scene)
+		require.NoError(t, err)
+		return len(got.Sources)
+	}
 
-	// The bridge's script creates these as colour sources. Seeding one makes
-	// handleEnsureInput take its "exists, update it" branch, which is the
-	// branch that reaches applySettings.
-	_, err := mock.CreateInput("Scene 1", bridge.InboxSource, "color_source_v3", nil)
-	require.NoError(t, err)
+	t.Run("the create path: no such source yet", func(t *testing.T) {
+		server, mock := testServer(t)
+		before := sceneSourceCount(t, mock, "Gaming")
 
-	_, _, err = server.handleEnsureInput(context.Background(), nil, EnsureInputInput{
-		SceneName:  "Scene 1",
-		SourceName: bridge.InboxSource,
-		InputKind:  "color_source_v3",
-		Settings:   bridgeCommand(),
+		_, _, err := server.handleEnsureInput(context.Background(), nil, EnsureInputInput{
+			SceneName:  "Gaming",
+			SourceName: bridge.InboxSource,
+			InputKind:  "color_source_v3",
+			Settings:   bridgeCommand(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "run_lua_in_obs")
+
+		// No decoy left behind to collide with the real transport the day the
+		// bridge is installed.
+		_, err = mock.GetSourceSettings(bridge.InboxSource)
+		assert.Error(t, err, "a source must not have been created under the reserved name")
+		assert.Equal(t, before, sceneSourceCount(t, mock, "Gaming"))
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "run_lua_in_obs")
 
-	settings, err := mock.GetSourceSettings(bridge.InboxSource)
-	require.NoError(t, err)
-	assert.NotContains(t, settings, "lua", "the chunk must not have reached the inbox")
+	t.Run("the place path: the source exists outside this scene", func(t *testing.T) {
+		server, mock := testServer(t)
+		_, err := mock.CreateInput("Scene 1", bridge.InboxSource, "color_source_v3", nil)
+		require.NoError(t, err)
+		before := sceneSourceCount(t, mock, "Gaming")
+
+		// Settings omitted on purpose: this is the call that used to report
+		// "placed" and never refuse at all.
+		_, _, err = server.handleEnsureInput(context.Background(), nil, EnsureInputInput{
+			SceneName:  "Gaming",
+			SourceName: bridge.InboxSource,
+			InputKind:  "color_source_v3",
+		})
+		require.Error(t, err, "placing the transport into a scene must be refused")
+		assert.Contains(t, err.Error(), "run_lua_in_obs")
+		assert.Equal(t, before, sceneSourceCount(t, mock, "Gaming"),
+			"the transport must not have been added to the scene before refusing")
+	})
+
+	t.Run("the write path: the source is already in this scene", func(t *testing.T) {
+		server, mock := testServer(t)
+		_, err := mock.CreateInput("Scene 1", bridge.InboxSource, "color_source_v3", nil)
+		require.NoError(t, err)
+
+		_, _, err = server.handleEnsureInput(context.Background(), nil, EnsureInputInput{
+			SceneName:  "Scene 1",
+			SourceName: bridge.InboxSource,
+			InputKind:  "color_source_v3",
+			Settings:   bridgeCommand(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "run_lua_in_obs")
+
+		settings, err := mock.GetSourceSettings(bridge.InboxSource)
+		require.NoError(t, err)
+		assert.NotContains(t, settings, "lua", "the chunk must not have reached the inbox")
+	})
+
+	// The guard sits above the kind check, so a caller cannot get a different
+	// error -- or a different outcome -- by naming the wrong kind.
+	t.Run("whatever kind is claimed", func(t *testing.T) {
+		server, mock := testServer(t)
+		_, err := mock.CreateInput("Scene 1", bridge.MailboxSource, "color_source_v3", nil)
+		require.NoError(t, err)
+
+		_, _, err = server.handleEnsureInput(context.Background(), nil, EnsureInputInput{
+			SceneName:  "Scene 1",
+			SourceName: bridge.MailboxSource,
+			InputKind:  "browser_source",
+			Settings:   bridgeCommand(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "run_lua_in_obs",
+			"the reservation must win over the kind-mismatch message")
+	})
 }
 
 // Not an escalation, but ADR-013 lists deleting the inbox as a hazard: it
