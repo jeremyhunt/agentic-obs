@@ -50,9 +50,22 @@ main.go                            # install-bridge / uninstall-bridge subcomman
 
 Server startup calls `registerScriptingChannel(s)` unconditionally; the two
 files decide what it means. Plain `go build` compiles the stub, so **the
-upstream binary cannot contain the eval path**, and if a curated tool ever grows
-a dependency on it the untagged build fails to compile. That is the guarantee,
-enforced by the compiler.
+upstream binary carries no `run_lua_in_obs`**, and if a curated tool ever grows
+a dependency on it the untagged build fails to compile.
+
+The build tag alone was never the whole story, and this section used to say it
+was. The transport is a pair of sources addressed by *name*, so any tool that
+writes an arbitrary settings map to an arbitrary source is a second way in:
+`set_source_settings` — default-enabled, never elicited — could write
+`{id, lua, args}` to `agentic-obs-inbox` and read the answer out of
+`agentic-obs-mailbox` on an untagged binary. Those two names are therefore
+reserved against the general-purpose tools
+(`internal/mcp/bridge_reserved.go`).
+
+Stated accurately: the default binary contains no *unreviewed* eval path, and
+the transport's source names are reserved so no general-purpose tool reaches
+the bridge. Neither is a boundary against whoever holds the obs-websocket
+password, who can load their own script.
 
 The runtime gate is the env var `AGENTIC_OBS_SCRIPTING=1`, deliberately *not* a
 value in SQLite: tool configuration lives there and `set_tool_config` can write

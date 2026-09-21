@@ -9,6 +9,12 @@ package mcp
 // is a Meta tool that is always enabled and can turn any group on, so a group
 // the model can see is a group the model can enable. Build with
 // `-tags scripting` and set AGENTIC_OBS_SCRIPTING=1 to include it.
+//
+// Compiling the tool out is not by itself the whole gate, and claiming it was
+// overstated the case. The bridge's transport is addressed by source name, so
+// a general-purpose settings write reaches it in any build; those two names
+// are reserved separately, in bridge_reserved.go. What this file guarantees is
+// narrower: the default binary carries no unreviewed eval path.
 func registerScriptingChannel(s *Server) {}
 
 // scriptingToolNames is empty here: the default build serves no scripting

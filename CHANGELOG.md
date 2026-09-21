@@ -7,6 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **The Lua bridge's transport was reachable through an always-on tool** —
+  the bridge addresses its two sources by name, and `set_source_settings`
+  writes an arbitrary settings map to a source chosen by name. It sits in the
+  default-enabled Sources group and is never elicited, so on a stock `go build`
+  binary — no `scripting` tag, no `AGENTIC_OBS_SCRIPTING` — writing
+  `{id, lua, args}` to `agentic-obs-inbox` and reading `agentic-obs-mailbox`
+  back ran arbitrary code inside OBS with no gate touched. `ensure_input` was
+  the same write by another route.
+
+  `agentic-obs-inbox` and `agentic-obs-mailbox` are now refused by
+  `set_source_settings`, `ensure_input`, `remove_source` and
+  `duplicate_source`. The last two are not an escalation, but ADR-013 already
+  listed deleting the inbox as a hazard that breaks the bridge silently. Reads
+  stay open — they expose nothing `get_obs_status`'s `bridge` field does not
+  already report.
+
 - **A preset could not express a source placed twice in one scene (FB-93)** —
   `apply_scene_preset` built a name-to-id map, so a scene holding the same source
   twice produced two preset entries under one name and both landed on whichever
@@ -43,6 +59,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   It is compiled out rather than switched off because `set_tool_config` is a
   Meta tool that can enable any group, so a group the model can see is one it
   can turn on for itself.
+
+  The build tag is not the whole gate on its own: the transport is addressed by
+  source name, so the two names are reserved separately (see Fixed, above).
+  Accurately stated, the default binary contains no unreviewed eval path, and
+  no general-purpose tool reaches the transport.
 
 - **`apply_scene_preset` takes `dry_run` (FB-93)** — defaulting to **false**,
   unlike `apply_scene_spec`. A preset changes visibility and nothing else and is

@@ -114,9 +114,17 @@ that is the one repair this design cannot perform on itself.
 carrying `obslua` and the safe stdlib, and **not** `os`, `io`, `package`,
 `require`, `dofile`, `loadfile` or `debug`.
 
-It is also bounded by instruction count via `debug.sethook`, so a runaway loop
-is interrupted rather than left running — the same call FB-86 made for runaway
-automation rules.
+It is also bounded by instruction count via `debug.sethook` — the same call
+FB-86 made for runaway automation rules — which stops an *ordinary* runaway
+loop. It is not a hard bound, and an earlier draft of this ADR said it was. A
+chunk that wraps its own loop in its own `pcall` catches the error the hook
+raises like any other error, so the hook re-arms, the loop continues, and OBS
+stays wedged with no upper bound: Lua 5.1 gives a hook no way to raise an error
+a script-level `pcall` cannot catch, and a count hook cannot yield across the C
+boundary either, so a coroutine would not help. The real backstop in that case
+is the Go side's 2 s transport timeout, which lets agentic-obs report failure
+and carry on — it does not unwedge OBS. A bridge that was not itself Lua could
+close this; this one cannot.
 
 **What this is and is not.** It is blast-radius reduction against an agent's
 mistakes. It is **not** a security boundary against whoever holds the
@@ -136,6 +144,27 @@ drops frames on a live stream. The bridge inherits this from OBS scripting
 generally rather than introducing it — every script in the workspace already has
 it — but an agent authoring chunks makes it much easier to hit, which is the
 other reason for the instruction bound above.
+
+### 6. The transport's source names are reserved
+
+Addressing the transport by name is what makes it simple, and it is also what
+makes it reachable. Any tool that writes an arbitrary settings map to a source
+chosen by name can write `{id, lua, args}` to `agentic-obs-inbox` and read the
+answer out of `agentic-obs-mailbox` — which is the whole protocol, reached
+without the scripting channel's build tag, environment variable or per-call
+confirmation. `set_source_settings` did exactly that, from the default-enabled
+Sources group.
+
+The two names are therefore refused by the general-purpose write and structural
+tools — `set_source_settings`, `ensure_input`, `remove_source`,
+`duplicate_source` — in `internal/mcp/bridge_reserved.go`, compared against the
+`internal/bridge` constants so a rename cannot leave a stale literal behind.
+Reads stay open: they expose nothing `get_obs_status`'s `bridge` field does not
+already report.
+
+This closes the bypass through this server's own tools. It is not a boundary
+against whoever holds the obs-websocket password, who can write those settings
+directly.
 
 ## Alternatives rejected
 
@@ -175,6 +204,15 @@ other reason for the instruction bound above.
 - The bridge executes code an LLM wrote, inside OBS, on the render thread. The
   sandbox and the instruction bound reduce the blast radius of a mistake; neither
   makes it safe to point at an OBS you do not own.
+- **The instruction bound is not a hard bound.** It stops an ordinary runaway
+  loop and nothing more: a chunk whose loop sits inside its own `pcall` swallows
+  the hook's error, the hook re-arms, and OBS stays blocked indefinitely. The Go
+  side's timeout lets agentic-obs report the failure; it cannot free the render
+  thread. Recovering from that needs a human to close OBS.
+- Installing the bridge means two source names are no longer the operator's to
+  use. `agentic-obs-inbox` and `agentic-obs-mailbox` are refused by the write
+  and structural tools whether or not the bridge is installed, since nothing
+  here can tell an operator's identically-named source from the transport.
 - Chunks are untyped and unvalidated on the way in. A malformed one returns
   `ok=false` rather than a schema error.
 - Two sources exist in the operator's collection that belong to no scene. They
