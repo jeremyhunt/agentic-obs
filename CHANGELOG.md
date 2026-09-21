@@ -19,6 +19,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   source plus occurrence. Both placements land.
 
 ### Added
+- **The Lua bridge** — agentic-obs can run code inside the OBS process, over a
+  pair of source-settings mailboxes. Both directions are push and the round
+  trip measures about 30 ms.
+
+  obs-websocket's vendor API would have been the obvious transport and is
+  closed to Lua: `calldata_ptr` hands its proc handler back as a bare `void*`
+  that SWIG will not retype. Script reload is closed to everyone outside the
+  frontend-tools plugin, so the bridge ships code rather than reloading files.
+  See [ADR-013](design/decisions/013-the-lua-bridge.md).
+
+  Install with `agentic-obs install-bridge --all` while OBS is closed. Scene
+  collections keep their own script lists, so a new collection needs another
+  run. `get_obs_status` reports whether the bridge is loaded.
+
+- **`run_lua_in_obs`, absent from default builds** — the scripting channel needs
+  both `-tags scripting` at build time and `AGENTIC_OBS_SCRIPTING=1` at startup.
+  It is compiled out rather than switched off because `set_tool_config` is a
+  Meta tool that can enable any group, so a group the model can see is one it
+  can turn on for itself.
+
 - **`apply_scene_preset` takes `dry_run` (FB-93)** — defaulting to **false**,
   unlike `apply_scene_spec`. A preset changes visibility and nothing else and is
   what an operator reaches for mid-stream, so every existing caller still gets
