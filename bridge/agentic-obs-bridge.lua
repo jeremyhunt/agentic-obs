@@ -12,8 +12,11 @@ will not retype. ADR-013 has the measurements.
 
 EVERYTHING HERE RUNS ON THE VIDEO THREAD. obs_source_update defers on a video
 source and the signal is raised from obs_source_video_tick, so a chunk that
-blocks drops frames. That is what the instruction budget is for, and why this
-script has no timers.
+blocks drops frames. A timer could not help with that anyway: this thread is
+synchronous, so nothing runs to fire one until the chunk returns control. The
+instruction budget below stands in for a timer instead, but it only bounds an
+ordinary runaway loop -- see the comment on INSTRUCTION_BUDGET for what it
+does not cover.
 ]]
 
 obs = obslua
@@ -22,8 +25,18 @@ local INBOX = "agentic-obs-inbox"
 local MAILBOX = "agentic-obs-mailbox"
 local VERSION = "1"
 
--- A frame's worth of work, near enough. Not a security control: it stops a
--- runaway loop from hanging OBS, the way FB-86 stops a runaway rule.
+-- A frame's worth of work, near enough. Not a security control: it stops an
+-- ordinary runaway loop, the way FB-86 stops a runaway rule -- but it is not
+-- a hard bound. A chunk that wraps its own loop in its own pcall (see run(),
+-- below) catches the error this budget's hook raises just like any other
+-- error, so the hook keeps firing and the chunk keeps running: Lua 5.1 gives
+-- a hook no way to raise an error a script-level pcall cannot catch, and a
+-- coroutine would not help either, since a count hook cannot yield across
+-- the C boundary. When that happens OBS itself stays blocked with no upper
+-- bound, and the real backstop is the Go side's 2s transport timeout
+-- (internal/bridge/transport.go), which lets agentic-obs recover and report
+-- failure even while OBS stays wedged. A bridge that was not itself Lua
+-- could close this gap; this one cannot.
 local INSTRUCTION_BUDGET = 2000000
 
 -- Caps on what a chunk may hand back. Exceeding one is a failure, never a
@@ -81,7 +94,7 @@ local function make_env(args)
 	}
 end
 
--- to_data walks a returned Lua value into an obs_data_t.
+-- set_value walks a returned Lua value into an obs_data_t.
 --
 -- Everything is nested under one key because obs_data has no "set arbitrary
 -- value" call -- the type has to be chosen per field.
@@ -110,7 +123,16 @@ local function set_value(data, key, value, depth, budget)
 		end
 		local child = obs.obs_data_create()
 		for k, v in pairs(value) do
-			local ok, err = set_value(child, tostring(k), v, depth + 1, budget)
+			-- Keys are part of the encoding too: without this, a chunk
+			-- returning one table with a huge key would sail past MAX_BYTES
+			-- and still read as success.
+			local key_str = tostring(k)
+			budget.bytes = budget.bytes + #key_str
+			if budget.bytes > MAX_BYTES then
+				obs.obs_data_release(child)
+				return false, "the result exceeded " .. MAX_BYTES .. " bytes"
+			end
+			local ok, err = set_value(child, key_str, v, depth + 1, budget)
 			if not ok then
 				obs.obs_data_release(child)
 				return false, err
@@ -134,6 +156,12 @@ local function answer(id, ok, value, err)
 	obs.obs_data_set_string(settings, "id", id)
 	obs.obs_data_set_bool(settings, "ok", ok)
 	obs.obs_data_set_string(settings, "error", err or "")
+
+	-- Cleared unconditionally, like every other field: obs_source_update
+	-- merges into the mailbox's existing settings, so a later failing call
+	-- would otherwise leave a previous success's result sitting under this
+	-- key, and the Go side reads settings["result"] on every reply.
+	obs.obs_data_set_string(settings, "result", "")
 
 	if ok then
 		local written, cap_err = set_value(settings, "result", value, 0, { bytes = 0 })
