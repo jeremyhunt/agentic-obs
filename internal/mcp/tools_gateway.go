@@ -83,6 +83,14 @@ func (s *Server) handlePressSourcePropertiesButton(ctx context.Context, request 
 	start := time.Now()
 	log.Printf("Pressing button '%s' on source '%s'", input.PropertyName, input.SourceName)
 
+	// A properties button is a source's own action, and what it does is the
+	// source kind's business rather than something this layer can bound. See
+	// bridge_reserved.go.
+	if isBridgeTransport(input.SourceName) {
+		s.recordAction("press_source_properties_button", "Press source properties button", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportReserved("press_source_properties_button", input.SourceName)
+	}
+
 	if err := s.obsClient.PressInputPropertiesButton(input.SourceName, input.PropertyName); err != nil {
 		s.recordAction("press_source_properties_button", "Press source properties button", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to press properties button: %w", err)

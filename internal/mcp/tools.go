@@ -1284,6 +1284,12 @@ func (s *Server) handleCreateScene(ctx context.Context, request *mcpsdk.CallTool
 	start := time.Now()
 	log.Printf("Creating scene: %s", input.SceneName)
 
+	// Scenes and sources share one namespace in OBS. See bridge_reserved.go.
+	if isBridgeTransport(input.SceneName) {
+		s.recordAction("create_scene", "Create scene", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportSceneName("create_scene", input.SceneName)
+	}
+
 	if err := s.obsClient.CreateScene(input.SceneName); err != nil {
 		s.recordAction("create_scene", "Create scene", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to create scene: %w", err)
@@ -1297,6 +1303,14 @@ func (s *Server) handleCreateScene(ctx context.Context, request *mcpsdk.CallTool
 func (s *Server) handleRemoveScene(ctx context.Context, request *mcpsdk.CallToolRequest, input SceneNameInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
 	log.Printf("Removing scene: %s - requesting confirmation", input.SceneName)
+
+	// Above the elicitation, so an operator is not asked to confirm something
+	// that is going to be refused anyway. Same namespace argument as
+	// create_scene: see bridge_reserved.go.
+	if isBridgeTransport(input.SceneName) {
+		s.recordAction("remove_scene", "Remove scene", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportSceneName("remove_scene", input.SceneName)
+	}
 
 	// Request user confirmation before deleting scene
 	confirmed, err := ElicitDeleteConfirmation(ctx, getSession(request), "scene", input.SceneName)
@@ -1580,6 +1594,11 @@ func (s *Server) handleGetInputMute(ctx context.Context, request *mcpsdk.CallToo
 func (s *Server) handleToggleInputMute(ctx context.Context, request *mcpsdk.CallToolRequest, input ToggleInputMuteInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
 
+	if isBridgeTransport(input.InputName) {
+		s.recordAction("toggle_input_mute", "Toggle input mute", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportReserved("toggle_input_mute", input.InputName)
+	}
+
 	if input.Muted != nil {
 		log.Printf("Setting mute=%v for input: %s", *input.Muted, input.InputName)
 		if err := s.obsClient.SetInputMute(input.InputName, *input.Muted); err != nil {
@@ -1615,6 +1634,11 @@ func (s *Server) handleToggleInputMute(ctx context.Context, request *mcpsdk.Call
 func (s *Server) handleSetInputVolume(ctx context.Context, request *mcpsdk.CallToolRequest, input SetVolumeInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
 	log.Printf("Setting volume for input: %s", input.InputName)
+
+	if isBridgeTransport(input.InputName) {
+		s.recordAction("set_input_volume", "Set input volume", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportReserved("set_input_volume", input.InputName)
+	}
 
 	if err := s.obsClient.SetInputVolume(input.InputName, input.VolumeDb, input.VolumeMul); err != nil {
 		s.recordAction("set_input_volume", "Set input volume", input, nil, false, time.Since(start))
@@ -2764,6 +2788,11 @@ func (s *Server) handleCreateSourceFilter(ctx context.Context, request *mcpsdk.C
 	start := time.Now()
 	log.Printf("Creating filter '%s' of type '%s' on source '%s'", input.FilterName, input.FilterKind, input.SourceName)
 
+	if isBridgeTransport(input.SourceName) {
+		s.recordAction("create_source_filter", "Create source filter", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportReserved("create_source_filter", input.SourceName)
+	}
+
 	if err := s.obsClient.CreateSourceFilter(input.SourceName, input.FilterName, input.FilterKind, input.FilterSettings); err != nil {
 		s.recordAction("create_source_filter", "Create source filter", input, nil, false, time.Since(start))
 		return nil, nil, fmt.Errorf("failed to create filter: %w", err)
@@ -2783,6 +2812,12 @@ func (s *Server) handleCreateSourceFilter(ctx context.Context, request *mcpsdk.C
 func (s *Server) handleRemoveSourceFilter(ctx context.Context, request *mcpsdk.CallToolRequest, input RemoveSourceFilterInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
 	log.Printf("Removing filter '%s' from source '%s' - requesting confirmation", input.FilterName, input.SourceName)
+
+	// Above the elicitation: nobody should be asked to confirm a refusal.
+	if isBridgeTransport(input.SourceName) {
+		s.recordAction("remove_source_filter", "Remove source filter", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportReserved("remove_source_filter", input.SourceName)
+	}
 
 	// Request user confirmation before removing filter
 	confirmed, err := ElicitFilterRemovalConfirmation(ctx, getSession(request), input.SourceName, input.FilterName)
@@ -2813,6 +2848,11 @@ func (s *Server) handleRemoveSourceFilter(ctx context.Context, request *mcpsdk.C
 func (s *Server) handleToggleSourceFilter(ctx context.Context, request *mcpsdk.CallToolRequest, input ToggleSourceFilterInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
 	log.Printf("Toggling filter '%s' on source '%s'", input.FilterName, input.SourceName)
+
+	if isBridgeTransport(input.SourceName) {
+		s.recordAction("toggle_source_filter", "Toggle source filter", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportReserved("toggle_source_filter", input.SourceName)
+	}
 
 	var enabled bool
 	if input.FilterEnabled != nil {
@@ -2852,6 +2892,11 @@ func (s *Server) handleToggleSourceFilter(ctx context.Context, request *mcpsdk.C
 func (s *Server) handleSetSourceFilterSettings(ctx context.Context, request *mcpsdk.CallToolRequest, input SetSourceFilterSettingsInput) (*mcpsdk.CallToolResult, any, error) {
 	start := time.Now()
 	log.Printf("Setting filter settings for '%s' on source '%s'", input.FilterName, input.SourceName)
+
+	if isBridgeTransport(input.SourceName) {
+		s.recordAction("set_source_filter_settings", "Set source filter settings", input, nil, false, time.Since(start))
+		return nil, nil, errBridgeTransportReserved("set_source_filter_settings", input.SourceName)
+	}
 
 	// Default to overlay mode (merge settings)
 	overlay := true

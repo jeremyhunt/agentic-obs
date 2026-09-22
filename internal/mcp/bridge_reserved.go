@@ -31,15 +31,26 @@ import (
 // own layer rather than here, because neither passes through these helpers:
 // call_obs_request refuses a request whose payload addresses the transport by
 // name or by uuid (internal/obs/dispatch.go), and apply_scene_spec refuses a
-// spec that names it once dry_run is false (internal/scenespec/apply.go).
-// Together those close addressing the transport by name through this server's
-// tools. What none of it touches, and what no amount of guarding here could:
-// whoever holds the obs-websocket password can write those settings directly,
-// or load a script of their own.
+// spec that names it, when the apply is not a dry run and its field mask can
+// reach a source (internal/scenespec/apply.go).
+//
+// Together those close addressing the transport BY NAME OR BY UUID through
+// this server's tools. Three things they do not close, stated here because
+// this file is what the rest of the documentation cites. A scene item id is
+// not a name: call_obs_request can still copy an existing placement of the
+// transport with DuplicateSceneItem. call_vendor_request does not pass through
+// any of this. And whoever holds the obs-websocket password can write those
+// settings directly, or load a script of their own.
+//
+// There is no fixed number of guard sites, and there should not be one written
+// down: the count has been wrong at every previous revision of this comment.
+// internal/mcp/bridge_surface_test.go is the authority instead -- it drives
+// every tool that lets a caller name a source or a scene and fails for any
+// that neither refuses nor carries a written reason it need not.
 //
 // isBridgeTransport delegates to obs.IsBridgeTransport rather than comparing
-// the constants again, so there is one predicate for all four guard sites and
-// no second copy to drift.
+// the constants again, so every guard site shares one predicate with
+// internal/obs and internal/scenespec, with no second copy to drift.
 func isBridgeTransport(name string) bool {
 	return obs.IsBridgeTransport(name)
 }
@@ -58,5 +69,42 @@ func errBridgeTransportChange(tool, name string) error {
 	return fmt.Errorf(
 		"%q is the Lua bridge's transport and is not changeable through %s: removing or copying it breaks the "+
 			"bridge with no error anywhere. Use 'agentic-obs uninstall-bridge' to take the bridge out",
+		name, tool)
+}
+
+// errBridgeTransportReserved refuses a write to the transport that is not
+// itself an escalation.
+//
+// Filters, mute, volume and a properties button all write the transport source
+// without reaching its settings, so none of them runs Lua: only the inbox's own
+// update signal does that, and only a settings write raises it. They are
+// refused anyway, for two reasons worth saying out loud rather than leaving to
+// be re-derived. The reservation is then ONE rule -- agentic-obs does not write
+// the transport -- instead of a per-tool judgement about which writes happen to
+// be harmless, and that judgement is exactly what was got wrong twice. And
+// call_obs_request already refuses every one of these requests, so without this
+// the same operation was denied through the passthrough and allowed through its
+// typed tool.
+func errBridgeTransportReserved(tool, name string) error {
+	return fmt.Errorf(
+		"%q is the Lua bridge's transport and agentic-obs does not write it through %s. This particular "+
+			"write does not run code -- only a settings write on the inbox does that -- but the transport "+
+			"is reserved against every tool that writes it by name, so that the rule is one rule and so "+
+			"that this tool agrees with call_obs_request, which refuses the same request. Use "+
+			"'agentic-obs uninstall-bridge' to take the bridge out",
+		name, tool)
+}
+
+// errBridgeTransportSceneName refuses a scene under a reserved name.
+//
+// OBS keeps scenes and sources in ONE namespace -- a scene is an obs_source_t,
+// and obs_get_source_by_name does not distinguish them -- so a scene called
+// agentic-obs-inbox collides with the transport rather than sitting beside it.
+// What OBS does with the collision is not worth finding out on a live machine.
+func errBridgeTransportSceneName(tool, name string) error {
+	return fmt.Errorf(
+		"%q is the Lua bridge's transport and is not available as a scene name through %s: OBS keeps scenes "+
+			"and sources in one namespace, so a scene under that name collides with the transport. Pick "+
+			"another name, or use 'agentic-obs uninstall-bridge' to take the bridge out",
 		name, tool)
 }
