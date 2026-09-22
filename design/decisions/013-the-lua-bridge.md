@@ -147,18 +147,58 @@ compiled on this machine — and it is paid on every chunk; the guard is `if jit
 then`, so the script still loads under a vanilla Lua 5.1 that has no `jit`
 table.
 
-Even interpreted, it is not a hard bound, and an earlier draft of this ADR said
-it was. A chunk that wraps its own loop in its own `pcall` catches the error
-the hook raises like any other error, so the hook re-arms, the loop continues,
-and OBS stays wedged with no upper bound: LuaJIT (Lua 5.1 ABI) gives a hook no
-way to raise an error a script-level `pcall` cannot catch, and a count hook
-cannot yield across the C boundary either, so a coroutine would not help. Nor
-does it cover one long C call — the hook counts VM instructions, so time inside
-`string.rep`, a pathological `string.find` pattern, or a blocking `obslua` call
-is not counted at all. The real backstop in any of these cases is the Go side's
-2 s transport timeout, which lets agentic-obs report failure and carry on — it
-does not unwedge OBS. A bridge that was not itself Lua could close this; this
-one cannot.
+**It shipped false a second time, after that fix.** With `jit.off` applied the
+hook did fire against a real OBS — confirmed in OBS's own log, about 500 times
+a second — and the loop still would not stop: `while true do end` burned 9.55
+CPU-seconds in 4 wall-seconds and needed a second force-stop. The 255 log
+lines it produced were missing this bridge's own `[agentic-obs]` prefix, which
+is what pointed at the real cause: `obs-scripting-lua.c`'s
+`add_hook_functions()` replaces the *global* `error` and `print` with its own
+C functions before a script's file is ever read, and neither does what its
+name promises — `hook_error` reads the message, logs it through OBS's own
+script-error path, and returns normally, exactly like `print`. No `lua_error`,
+no unwind. Nothing in the bridge script is `setfenv`'d away from that global
+scope except the sandboxed chunk itself, so the budget hook's own
+`error("the chunk exceeded its instruction budget", 2)` call was never raising
+anything — it was logging, under OBS's prefix instead of the bridge's, and
+letting the interpreter carry on to the next instruction, which is why the
+hook could fire forever without ever bounding anything. `run()` now signals
+with `assert(false, msg)` instead. OBS never touches `assert`, and `assert`
+raises through the C API directly (`lua_error`, or LuaJIT's own
+`lj_err_callermsg`) rather than through the Lua-callable global `error`, so it
+works regardless of what that global currently is. Verified directly against
+OBS's `lua51.dll` with `error` and `print` replaced exactly as
+`add_hook_functions()` replaces them (a throwaway ctypes harness, not
+committed): the pre-fix hook does not stop `while true do end` at all inside
+an 8-second bound; the `assert`-based one stops it in under a millisecond,
+repeatably. The same replacement means a **chunk's own** `error()` call —
+which the sandbox deliberately exposes — has the identical problem and is
+*not* fixed by this change: a chunk that calls `error("something failed")` to
+signal its own failure logs to OBS's Script Log and keeps running past that
+line rather than failing the call. That is a separate, pre-existing defect
+from the instruction budget, newly surfaced by this same investigation and
+left unresolved here — see the comment beside `error = error` in
+`make_env()`.
+
+Even fixed twice over, it is not a hard bound, and an earlier draft of this
+ADR said it was. A chunk that wraps its own loop in its own `pcall` catches
+the error the hook raises like any other error; on its own that only costs
+one pass through the loop, since `pcall` ends the protected call rather than
+resuming what it caught, but a chunk that re-enters `pcall` from an
+unprotected outer loop (`while true do pcall(risky) end`) gets a fresh
+protected call every pass, and the hook has no way to reach past that — it can
+only raise into the nearest `pcall`, and that one belongs to the chunk. A
+coroutine does not change this: wrapping the whole chunk in one only moves the
+*outermost* catch, and does nothing to whatever `pcall` the chunk installs for
+itself on the inside, which is the one actually catching each firing — checked
+directly against the `assert`-based hook above, both on the main thread and
+inside a `coroutine.resume`, rather than assumed. Nor does the budget cover
+one long C call — the hook counts VM instructions, so time inside
+`string.rep`, a pathological `string.find` pattern, or a blocking `obslua`
+call is not counted at all. The real backstop in any of these cases is the Go
+side's 2 s transport timeout, which lets agentic-obs report failure and carry
+on — it does not unwedge OBS. A bridge that was not itself Lua could close
+this; this one cannot.
 
 **What this is and is not.** It is blast-radius reduction against an agent's
 mistakes. It is **not** a security boundary against whoever holds the
@@ -350,14 +390,28 @@ does not say.
   withhold `load`/`loadstring`: those are what make a chunk's own nested
   function prototypes — which `jit.off(chunk, true)`'s recursive argument
   covers — the only Lua code the chunk can ever hand the interpreter.
-- **Even fixed, the instruction bound is not a hard bound.** It stops an
-  ordinary runaway loop and nothing more: a chunk whose loop sits inside its
-  own `pcall` swallows the hook's error, the hook re-arms, and OBS stays
-  blocked indefinitely — and one long C call (`string.rep`, a pathological
+- **The bound was defeated a second, independent way even after that fix, and
+  a second live test caught it too.** `obs-scripting-lua.c` replaces the
+  *global* `error` and `print` before a script ever loads; its replacement
+  logs and returns rather than raising, so the budget hook's own
+  `error(msg, 2)` call was never actually an error — confirmed on a real OBS
+  as ~500 hook fires a second with none of the bridge's own `[agentic-obs]`
+  log prefix, while `while true do end` kept running until it was
+  force-stopped a second time. `run()` now signals with `assert(false, msg)`,
+  which OBS does not touch and which raises through the C API directly. The
+  same replacement means a chunk's own `error()` call — which the sandbox
+  deliberately exposes — still only logs rather than failing the call; that
+  is a separate, pre-existing defect this fix does not resolve.
+- **Even fixed twice over, the instruction bound is not a hard bound.** It
+  stops an ordinary runaway loop and nothing more: a chunk that re-enters its
+  own `pcall` from an unprotected outer loop gets a fresh protected call every
+  pass, and the hook can only raise into the nearest one, which is the
+  chunk's own — a coroutine does not change this, since it moves only the
+  outermost catch. One long C call (`string.rep`, a pathological
   `string.find` pattern, a blocking `obslua` call) is not counted by the hook
-  at all, since it counts VM instructions, not wall time. The Go side's timeout
-  lets agentic-obs report the failure; it cannot free the render thread.
-  Recovering from either needs a human to close OBS.
+  at all either, since it counts VM instructions, not wall time. The Go
+  side's timeout lets agentic-obs report the failure; it cannot free the
+  render thread. Recovering from either needs a human to close OBS.
 - Installing the bridge means two source names are no longer the operator's to
   use. `agentic-obs-inbox` and `agentic-obs-mailbox` are refused by the write
   and structural tools whether or not the bridge is installed, since nothing

@@ -130,10 +130,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is what covers a loop the chunk hides inside a function of its own, and
   since the sandbox withholds `load` and `loadstring`, a chunk's nested
   function prototypes are all the Lua it can ever hand the interpreter — so
-  `jit.off(chunk, true)` reaches everything a chunk could compile. What the
-  budget still does not cover is unchanged from ADR-013: a chunk that wraps
-  its own loop in its own `pcall`, and one long C call (`string.rep`, a
-  pathological `string.find` pattern, a blocking `obslua` call), since the
+  `jit.off(chunk, true)` reaches everything a chunk could compile.
+
+  A second live test then found the budget still did not stop the loop even
+  with that fix: the hook fired (confirmed in OBS's own log, ~500 times a
+  second) but `while true do end` kept running, burning 9.55 CPU-seconds in 4
+  wall-seconds, and needed a second force-stop. The 255 log lines it produced
+  were missing this bridge's own `[agentic-obs]` prefix, which pointed at the
+  real cause: `obs-scripting-lua.c` replaces the *global* `error` and `print`
+  with its own logging shims before a script ever loads, and OBS's
+  replacement `error` logs the message and returns normally rather than
+  raising. The budget hook's own `error(msg, 2)` call was therefore never an
+  error at all — it logged, under OBS's prefix rather than the bridge's, and
+  the loop just kept going. `run()` now signals with `assert(false, msg)`
+  instead, which OBS does not touch and which raises through the C API
+  directly regardless of what the global `error` currently is; verified
+  against OBS's own `lua51.dll` with `error`/`print` replaced the same way
+  OBS replaces them, the old hook never stops `while true do end` and the new
+  one stops it in under a millisecond. The same replacement means a
+  **chunk's own** `error()` call — which the sandbox deliberately permits —
+  has the identical problem and is *not* fixed by this change: it still only
+  logs rather than failing the call. That is a separate, pre-existing defect,
+  newly surfaced by this investigation and left open.
+
+  What the budget still does not cover is otherwise unchanged from ADR-013: a
+  chunk that re-enters its own `pcall` from an unprotected outer loop of its
+  own (a coroutine would not change this), and one long C call (`string.rep`,
+  a pathological `string.find` pattern, a blocking `obslua` call), since the
   hook counts VM instructions rather than wall time. See
   [ADR-013](design/decisions/013-the-lua-bridge.md).
 

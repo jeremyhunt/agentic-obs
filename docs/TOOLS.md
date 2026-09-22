@@ -3028,16 +3028,30 @@ the interpreter only — once a loop compiles into a trace, the hook is never
 consulted again. `run()` keeps every chunk interpreted with `jit.off(chunk,
 true)` specifically so the budget has any effect at all; without it, a plain
 `while true do end` ran unbounded and pegged OBS's video thread until it was
-force-stopped. Interpreted, a chunk is interrupted after 2,000,000
-instructions, which stops an *ordinary* runaway loop — but a chunk whose loop
-sits inside its own `pcall` catches that interruption like any other error,
-the hook re-arms, and the loop continues with no upper bound while OBS's
-render thread stays wedged. Nor does it cover one long C call, such as
-`string.rep` or a blocking `obslua` call, since the hook counts VM
-instructions rather than wall time. LuaJIT gives a hook no way to raise an
-error a script-level `pcall` cannot catch. The 2-second transport timeout then
-lets agentic-obs report the failure; it does not free OBS. Recovering from
-that needs a human to close OBS.
+force-stopped.
+
+Interpreted is not enough by itself either. OBS's own scripting host replaces
+the *global* `error` and `print` with logging shims before a script ever
+loads, and the budget's hook signals by calling `assert(false, msg)` rather
+than `error(msg)` specifically because of that: OBS's replacement `error`
+logs the message and returns normally instead of raising, so the hook used to
+fire — confirmed in OBS's own log — while the loop it was supposed to stop
+kept running regardless, until forced closed. `assert` is untouched by that
+replacement and raises through the C API directly. The same replacement means
+a *chunk's* own `error()` call, which the sandbox otherwise permits, still
+only logs rather than failing the call that made it — a known, separate gap
+from the instruction budget.
+
+Fixed, a chunk is interrupted after 2,000,000 instructions, which stops an
+*ordinary* runaway loop — but a chunk whose loop sits inside its own `pcall`,
+re-entered from an unprotected outer loop, gets a fresh protected call every
+time the hook fires, and the hook can only raise into the nearest `pcall`,
+which is the chunk's own; wrapping the chunk in a coroutine does not change
+that, since it only moves the outermost catch. Nor does the budget cover one
+long C call, such as `string.rep` or a blocking `obslua` call, since the hook
+counts VM instructions rather than wall time. The 2-second transport timeout
+then lets agentic-obs report the failure; it does not free OBS. Recovering
+from either needs a human to close OBS.
 
 ### What comes back
 

@@ -95,11 +95,16 @@ What comes back:
 It runs on OBS's render thread, so a slow chunk drops frames. OBS's Lua is
 LuaJIT, which stops checking an instruction hook the moment a loop compiles to
 native code, so every chunk runs interpreted (jit.off) to keep the budget
-below real. A chunk is interrupted after 2,000,000 instructions, which stops
-an ordinary runaway loop -- but a loop inside the chunk's own pcall catches
-that interruption and keeps running, or one spent inside a single long call
-(e.g. string.rep) is not counted at all, and OBS stays wedged until someone
-closes it.`
+below real. OBS also replaces the global error/print with logging shims
+before a script loads, so the budget signals via assert rather than error --
+error would silently log and let the chunk keep running instead of stopping
+it, and the same shim means a chunk's own error() call only logs rather than
+failing the call that made it. A chunk is interrupted after 2,000,000
+instructions, which stops an ordinary runaway loop -- but a loop the chunk
+re-enters via its own pcall (in an unprotected outer loop of its own) catches
+that interruption every time and keeps running, or one spent inside a single
+long call (e.g. string.rep) is not counted at all, and OBS stays wedged until
+someone closes it.`
 
 func registerScriptingChannel(s *Server) {
 	if !scriptingEnabled() {
