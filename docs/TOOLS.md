@@ -3046,9 +3046,13 @@ a human to close OBS.
 ### The transport is reserved
 
 The bridge's two sources, `agentic-obs-inbox` and `agentic-obs-mailbox`, are
-refused by `set_source_settings`, `ensure_input`, `remove_source` and
-`duplicate_source` in every build. Writing the first is running Lua; removing
-either breaks the bridge. Reads are unaffected. Use `agentic-obs
+refused by every tool that names a source and writes it: `set_source_settings`,
+`ensure_input`, `remove_source`, `duplicate_source`, and the six typed creators
+— `create_text_source`, `create_image_source`, `create_color_source`,
+`create_browser_source`, `create_media_source` and `create_audio_input`. In
+every build. Writing the first is running Lua; removing either breaks the
+bridge; creating one under those names collides with the real transport the day
+the bridge is installed. Reads are unaffected. Use `agentic-obs
 uninstall-bridge` to take the bridge out.
 
 `call_obs_request` and `apply_scene_spec` are guarded too, each in its own way.
@@ -3061,7 +3065,16 @@ or as a placement, once `dry_run=false`; it refuses the whole apply rather than
 skipping that one source, and dry runs and `diff_scene_spec` are unaffected
 because they write nothing.
 
-What that adds up to: no tool here addresses the transport by name or uuid. It
-does not make the transport unreachable — a settings write that never names it
-would reach it, and none of this is a boundary against whoever holds the
-obs-websocket password, who can write those settings directly.
+`apply_scene_preset` shares `apply_scene_spec`'s reconciler but is restricted to
+`fields: ["enabled"]`, under which the only write available is toggling the
+visibility of a placement OBS already holds — so it is not refused, and a scene
+that somehow contains the transport stays appliable.
+
+What that adds up to: no tool here addresses the transport **by name or uuid**.
+Three things that does not say. It is not a claim about a scene item **id**:
+`call_obs_request` can still duplicate an existing placement of the transport
+with `DuplicateSceneItem`, which names nothing and writes no settings. It does
+not make the transport unreachable — a settings write added later without the
+reservation in mind would reach it as `set_source_settings` once did. And none
+of it is a boundary against whoever holds the obs-websocket password, who can
+write those settings directly.

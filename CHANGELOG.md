@@ -17,11 +17,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the same write by another route.
 
   `agentic-obs-inbox` and `agentic-obs-mailbox` are now refused by
-  `set_source_settings`, `ensure_input`, `remove_source` and
-  `duplicate_source`. The last two are not an escalation, but ADR-013 already
-  listed deleting the inbox as a hazard that breaks the bridge silently. Reads
-  stay open — they expose nothing `get_obs_status`'s `bridge` field does not
-  already report.
+  `set_source_settings`, `ensure_input`, `remove_source`, `duplicate_source`
+  and the six typed creators (`create_text_source`, `create_image_source`,
+  `create_color_source`, `create_browser_source`, `create_media_source`,
+  `create_audio_input`). `remove_source` and `duplicate_source` are not an
+  escalation, but ADR-013 already listed deleting the inbox as a hazard that
+  breaks the bridge silently. Reads stay open — they expose nothing
+  `get_obs_status`'s `bridge` field does not already report.
+
+  The creators were missed on the first pass and are worth naming rather than
+  folding in quietly. The guard went on `handleEnsureInput`, and
+  `create_color_source` with `if_exists: "update"` reaches `ensureInput` — the
+  unexported worker — through a kind check that cannot refuse it, because the
+  inbox really is a `color_source_v3`: that is what the bridge's Lua creates. So
+  a default-enabled Design tool placed the transport in a live scene and wrote
+  its settings. Not an eval route, since the creators build their own settings
+  maps and no `lua` key is reachable through them.
 
 - **`call_obs_request` reached the transport past that reservation** — the
   passthrough's deny-list keys on the request *type*, so `SetInputSettings`
@@ -52,14 +63,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   placements as well as sources, and refuses the *whole* apply rather than
   skipping that source — a partial apply reported as a success leaves a scene
   neither the spec nor the operator describes. Dry runs and `diff_scene_spec`
-  are unaffected; they write nothing. `apply_scene_preset` shares the
-  reconciler and inherits the guard, though it could not reach the transport
-  regardless.
+  are unaffected; they write nothing. Nor is an apply restricted to placement
+  state: `apply_scene_preset` shares the reconciler with `fields: ["enabled"]`,
+  under which the only write available is toggling the visibility of a placement
+  OBS already holds, so it is not refused and a scene containing the transport
+  stays appliable.
 
-  Together these close addressing the transport by name or uuid through this
-  server's tools. They do not make it unreachable: a settings write that never
-  names it would reach it, and nothing here is a boundary against whoever holds
-  the obs-websocket password. See
+  Together these close addressing the transport **by name or by uuid** through
+  this server's tools. Three things that does not say. Not by scene item *id*:
+  `call_obs_request` can still copy an existing placement of the transport with
+  `DuplicateSceneItem`, which names nothing and writes no settings. Not
+  unreachable: a settings write added later without the reservation in mind
+  reaches it as `set_source_settings` once did. And not a boundary against
+  whoever holds the obs-websocket password. See
   [ADR-012](design/decisions/012-extension-channel.md) and
   [ADR-013](design/decisions/013-the-lua-bridge.md), decision 6.
 
@@ -103,13 +119,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The build tag is not the whole gate on its own: the transport is addressed by
   source name, so the two names are reserved separately (see Fixed, above).
   Accurately stated, the default binary contains no unreviewed eval path, and no
-  tool here addresses the transport by name or by uuid — not the four that
+  tool here addresses the transport by name or by uuid — not the ten that
   address a source by name and write it, not `call_obs_request` and not
   `apply_scene_spec`. What that does *not* say: the transport is not
   unreachable. A settings write that never names it reaches it as
-  `set_source_settings` once did, and none of this is a boundary against
-  whoever holds the obs-websocket password. See
-  [ADR-013](design/decisions/013-the-lua-bridge.md), decision 6.
+  `set_source_settings` once did, `DuplicateSceneItem` addresses a placement by
+  number, `call_vendor_request` carries a vendor-defined payload past all of
+  this, and none of it is a boundary against whoever holds the obs-websocket
+  password. See [ADR-013](design/decisions/013-the-lua-bridge.md), decision 6.
 
 - **`apply_scene_preset` takes `dry_run` (FB-93)** — defaulting to **false**,
   unlike `apply_scene_spec`. A preset changes visibility and nothing else and is

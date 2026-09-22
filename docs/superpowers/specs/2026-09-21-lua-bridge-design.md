@@ -64,8 +64,13 @@ reserved against the general-purpose tools
 
 Stated accurately, and no more than that: the default binary contains no
 *unreviewed* eval path, and the transport's source names are reserved against
-the four tools that address a source by name and write it —
-`set_source_settings`, `ensure_input`, `remove_source`, `duplicate_source`.
+every tool that addresses a source by name and writes it — `set_source_settings`,
+`ensure_input`, `remove_source`, `duplicate_source`, and the six typed creators.
+The creators were missed on the first pass, which is worth recording rather than
+quietly fixing: the guard went on `handleEnsureInput`, and `create_color_source`
+with `if_exists: "update"` reaches the same unexported worker underneath, past a
+kind check that cannot refuse it because the inbox really is a
+`color_source_v3`.
 
 **The two further routes this section used to name as open are now closed**, at
 their own layers rather than in `bridge_reserved.go`, because neither passes
@@ -88,10 +93,16 @@ through it.
   nothing.
 
 Stated accurately again: what is closed is *addressing the transport by name or
-uuid through this server's tools*. A settings write that never names it — a tool
-added later without this in mind — reaches it as `set_source_settings` once did.
-And none of it is a boundary against whoever holds the obs-websocket password,
-who can write those settings directly or load their own script.
+by uuid through this server's tools*. Not by scene item id — `DuplicateSceneItem`
+copies an existing placement with a number and writes no settings. Not against a
+settings write added later without this in mind, which reaches the transport as
+`set_source_settings` once did; `createTypedSource` is the worked example, since
+it was missed the first time. Not `call_vendor_request`, which bypasses
+`CallRequest` altogether with a vendor-defined payload — no route to *this*
+bridge, whose whole premise is that the vendor API is closed to Lua, but
+`ass_run_macro` reaches an operator-configured execution channel. And not
+against whoever holds the obs-websocket password, who can write those settings
+directly or load their own script.
 
 The runtime gate is the env var `AGENTIC_OBS_SCRIPTING=1`, deliberately *not* a
 value in SQLite: tool configuration lives there and `set_tool_config` can write

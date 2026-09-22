@@ -468,9 +468,10 @@ from here.
 and whose request_data names "agentic-obs-inbox" or "agentic-obs-mailbox" in a
 *Name or *Uuid field. Those are the Lua bridge's transport, and writing the
 first runs code inside OBS -- use run_lua_in_obs for that, and 'agentic-obs
-uninstall-bridge' to take the bridge out. Reads of them are not refused, and the
-names appearing as a *value* elsewhere in the payload (a text source's text, a
-browser source's url) are not refused either.
+uninstall-bridge' to take the bridge out. Reads of them are not refused; nor is
+a request that reaches an existing placement by numeric sceneItemId, which names
+nothing; nor are the names appearing as a *value* elsewhere in the payload (a
+text source's text, a browser source's url).
 
 **Not reachable at all**: Get/SetSourcePrivateSettings and
 Get/SetSceneItemPrivateSettings. OBS offers them; the Go client library does not

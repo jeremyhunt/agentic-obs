@@ -155,10 +155,16 @@ without the scripting channel's build tag, environment variable or per-call
 confirmation. `set_source_settings` did exactly that, from the default-enabled
 Sources group.
 
-The two names are therefore refused by the general-purpose write and structural
-tools — `set_source_settings`, `ensure_input`, `remove_source`,
-`duplicate_source` — in `internal/mcp/bridge_reserved.go`, compared against
-`obs.IsBridgeTransport` so a rename cannot leave a stale literal behind. The two
+The two names are therefore refused by every tool that names a source and writes
+it: the general-purpose ones — `set_source_settings`, `ensure_input`,
+`remove_source`, `duplicate_source` — and the six typed creators, five of which
+share `createTypedSource` and one of which (`create_audio_input`) does not.
+The creators are not an eval route, since they build their own settings maps,
+but `create_color_source` with `if_exists: "update"` matched the inbox exactly —
+it really is a `color_source_v3`, which is what the Lua creates — and fell
+through the kind check into `ensureInput`, the unexported worker that carries no
+guard of its own. The guards are in `internal/mcp/bridge_reserved.go`, compared
+against `obs.IsBridgeTransport` so a rename cannot leave a stale literal behind. The two
 literals live in `internal/obs` rather than in `internal/bridge`, because
 `internal/bridge` imports `internal/obs` and the passthrough's guard is in
 `internal/obs/dispatch.go`; `internal/bridge` aliases them, so there is still
@@ -190,20 +196,43 @@ at its own layer, because neither passes through those helpers.
   describes — and checks placements as well as sources, since an item alone
   would have `ensurePlacements` put the transport into a live scene. Dry runs
   and `diff_scene_spec` stay open; they write nothing, and planning is how a
-  caller discovers a stored spec is contaminated. `apply_scene_preset` shares
-  the reconciler and inherits the guard, though it could not reach the
-  transport regardless: it masks to `fields: ["enabled"]`, a preset is built
-  only from a live scene capture, and entries naming sources the scene does not
-  hold are dropped before the spec is built.
+  caller discovers a stored spec is contaminated. The refusal is also gated on
+  the field mask, which is not a nicety: `apply_scene_preset` shares this
+  reconciler with `fields: ["enabled"]`, and under that mask `ensureSources`,
+  `ensurePlacements`, `reconcileOrder` and `prune` never run, so the only write
+  available is `SetSceneItemEnabled` on a placement OBS already holds. It
+  provably cannot write, create or place a source, and refusing it would make a
+  scene containing the transport un-appliable for nothing. `fieldMask.writesSources`
+  names the four aspects that can reach a source — source, placement, settings,
+  filters — and they are exactly the four write paths in `apply.go` that take a
+  source name rather than a scene item id.
 
 **What this achieves, and what it does not.** Together these close *addressing
-the transport by name or uuid through this server's tools*. They do not make the
-transport unreachable. A settings write that never names it — a future tool, an
-automation action, a code path added in this repo without the guard in mind —
-reaches it exactly as before; the guards are four call sites and two chokepoints,
-not a capability boundary the type system enforces. Nor is any of it a boundary
-against whoever holds the obs-websocket password, who can write those settings
-directly or load a script of their own.
+the transport by name or by uuid through this server's tools*. Four things that
+does not say.
+
+- **It is not a claim about scene item ids.** `DuplicateSceneItem` takes
+  `sceneName` and a numeric `sceneItemId`, so `call_obs_request` can still copy
+  an existing placement of the transport into another scene without naming it —
+  `sourceRefsIn` reads strings, and a number is invisible to it. No settings are
+  written, so it is not an eval route; it is a way to litter, and it needs the
+  transport to be placed in a scene in the first place, which the reservation
+  now refuses everywhere it can be asked for.
+- **It does not make the transport unreachable.** A settings write that never
+  names it — a future tool, an automation action, a code path added in this repo
+  without the guard in mind — reaches it exactly as before. The guards are call
+  sites and two chokepoints, not a capability boundary the type system enforces.
+- **`call_vendor_request` does not go through any of this.** It bypasses
+  `CallRequest` entirely (`internal/mcp/vendor.go` → `CallVendorRequest`) and
+  carries a vendor-defined payload, so a key that does not end in `Name` or
+  `Uuid` passes through untouched. It is not a route to *this* bridge — the Lua
+  script registers no vendor, because the vendor API being closed to Lua is the
+  whole reason this bridge exists — but `ass_run_macro` is a default-enabled
+  tool reaching an operator-configured execution channel in Advanced Scene
+  Switcher, and pretending otherwise would be the same overstatement this
+  decision has already had to correct twice.
+- **It is not a boundary against whoever holds the obs-websocket password**, who
+  can write those settings directly or load a script of their own.
 
 ## Alternatives rejected
 
@@ -256,10 +285,12 @@ directly or load a script of their own.
   bearing those names — a scene, a filter, a profile — because the guard reads
   the payload's `*Name` keys rather than knowing what kind of thing each one
   addresses.
-- The reservation is four call sites and two chokepoints, not a capability the
-  type system enforces. A settings write added later without it in mind reaches
-  the transport exactly as `set_source_settings` once did. The tests name the
-  routes; nothing stops a new one.
+- The reservation is a list of call sites plus two chokepoints, not a capability
+  the type system enforces. A settings write added later without it in mind
+  reaches the transport exactly as `set_source_settings` once did. The tests name
+  the routes; nothing stops a new one. `createTypedSource` is the proof rather
+  than the hypothesis: it was missed on the first pass because the guard was put
+  on `handleEnsureInput` and the create tools reach the same worker underneath.
 - Chunks are untyped and unvalidated on the way in. A malformed one returns
   `ok=false` rather than a schema error.
 - Two sources exist in the operator's collection that belong to no scene. They

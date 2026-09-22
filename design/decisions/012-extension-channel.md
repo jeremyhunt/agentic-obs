@@ -85,12 +85,21 @@ any request whose payload addresses a reserved transport source. Three details
 are load-bearing:
 
 - **What counts as addressing is decided by key shape**, not by the three field
-  names that matter today. A `*Name` or `*Uuid` key holding a reserved value, at
-  any depth, is a target; anything else is content. Scanning every string value
-  instead would refuse `SetInputSettings` on a text source whose text happens to
-  be `"agentic-obs-inbox"`, which is an absurd refusal; the key rule covers
-  `sceneName`, `newInputName`, `destinationSceneName` and whatever the next OBS
-  release adds without this seam being edited.
+  names that matter today. A `*Name`/`*Names` or `*Uuid`/`*Uuids` key holding a
+  reserved value, at any depth, is a target; anything else is content. Scanning
+  every string value instead would refuse `SetInputSettings` on a text source
+  whose text happens to be `"agentic-obs-inbox"`, which is an absurd refusal.
+
+  **And the rule is exhaustive here, not merely broad.** `CallRequest` marshals
+  `request_data` into goobs' generated params struct, which drops fields it does
+  not declare — so what a caller can address anything through is exactly goobs'
+  declared surface, and every field in it that mentions a name or a uuid is
+  spelled to match. `TestEverySourceAddressingFieldMatchesTheKeyRule` asserts
+  that over all 300 tagged params fields rather than trusting it, so a future
+  goobs adding `sourceNames` or `inputNameList` fails there instead of leaving
+  the guard quietly blind. The plural forms are matched for the same reason, at
+  a cost of two comparisons. A field spelled some third way would still be
+  missed; that test is what would say so.
 - **Reads stay open, and "read" is structural.** obs-websocket names every read
   `Get*` and nothing else, so a request that is not a `Get*` is treated as a
   write — including a request this build has never seen. Refusing reads would
@@ -100,14 +109,20 @@ are load-bearing:
 - **A uuid is resolved, not ignored.** A name-only guard is one call away from
   being bypassed — `GetInputList` is a read, it stays open, and it hands back
   the inbox's `inputUuid`. The reserved names are therefore resolved to whatever
-  uuids OBS holds for them, *only* when the payload actually carries one, so the
-  common path costs no extra round trip. A lookup that fails refuses rather than
-  guesses; it only fails when OBS is unreachable, in which case the request was
-  going to fail anyway.
+  uuids OBS holds for them, *only* when the payload actually carries one. That
+  is "when asked" rather than "almost never": goobs declares an optional
+  `canvasUuid` on thirty-odd params types. A lookup that fails while OBS is
+  connected refuses rather than guesses; a client that is not connected is
+  treated as holding no transport at all, so a uuid-bearing call on a dead
+  connection still reports `not connected to OBS` instead of something about the
+  Lua bridge.
 
-This closes addressing the transport through this tool. It is not a boundary
-against whoever holds the obs-websocket password, who can issue the identical
-request directly.
+This closes addressing the transport *by name or by uuid* through this tool. It
+does not reach a scene item **id**: `DuplicateSceneItem` takes a numeric
+`sceneItemId`, and a number is not a string this rule can read — that copies an
+existing placement and writes no settings, so it is not an eval route, but the
+scope is worth stating. And none of it is a boundary against whoever holds the
+obs-websocket password, who can issue the identical request directly.
 
 Calls route through the same middleware as every other tool, so action history
 and elicitation still apply, and `list_obs_requests` makes the surface

@@ -21,8 +21,11 @@ package mcp
 // by uuid. What this file guarantees is still narrower, and narrower is the
 // honest word: the default binary carries no unreviewed eval path. It does not
 // guarantee the transport is unreachable -- a settings write added later
-// without the reservation in mind would reach it, and none of this binds
-// whoever holds the obs-websocket password.
+// without the reservation in mind would reach it, exactly as createTypedSource
+// did until it was found; DuplicateSceneItem addresses a placement by number
+// rather than by name; call_vendor_request bypasses the passthrough entirely
+// with a vendor-defined payload; and none of this binds whoever holds the
+// obs-websocket password.
 func registerScriptingChannel(s *Server) {}
 
 // scriptingToolNames is empty here: the default build serves no scripting
