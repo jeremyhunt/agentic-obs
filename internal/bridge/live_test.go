@@ -13,6 +13,16 @@
 // run against a real OBS, because a LuaJIT trace does not check the count hook
 // the budget is built from, and reviewing the bridge against the Lua 5.1
 // manual could not have caught it.
+//
+// It failed a SECOND time after that fix, for an unrelated reason a mock
+// could not have caught either: obs-scripting-lua.c replaces the global
+// error and print with its own logging shims before a script ever loads, so
+// the budget hook's error(...) call was never actually raising anything --
+// it logged under OBS's own prefix and let the loop keep running, which is
+// why the hook could be firing (confirmed in OBS's own log) while the
+// process still had to be killed by hand. The bridge now signals with
+// assert instead, which OBS does not touch. See the comment on
+// INSTRUCTION_BUDGET in bridge/agentic-obs-bridge.lua.
 package bridge_test
 
 import (

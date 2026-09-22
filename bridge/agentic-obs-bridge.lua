@@ -24,6 +24,20 @@ unnoticed: the filename, the syntax and the manual all say 5.1. It matters
 because LuaJIT compiles hot code, and a compiled trace never consults a debug
 hook -- so run() must call jit.off on every chunk or the budget below does
 nothing at all. Verified against OBS's own lua51.dll: LuaJIT 2.1.1736781742.
+
+OBS ALSO REPLACES THE GLOBAL error AND print BEFORE THIS SCRIPT EVER LOADS.
+obs-scripting-lua.c's add_hook_functions() runs before the script file is
+read, and sets _G.error and _G.print to its own C functions, which log to
+OBS's Script Log and return normally -- no lua_error, no unwind. Nothing in
+this file is setfenv'd away from that global scope except the sandboxed
+chunk, so a bare error(...) call anywhere else in here, jit.off or not,
+was never actually raising anything: it was logging, under OBS's own
+prefix rather than this script's, and letting execution carry on. That
+defeated the budget completely even after jit.off fixed the tracing problem
+above -- see the comment on INSTRUCTION_BUDGET and run() for the fix
+(assert, which OBS does not touch) and for the one place this still bites
+(a chunk's own error() call, which the sandbox intentionally exposes and
+which is not fixed by that same change).
 ]]
 
 obs = obslua
@@ -46,14 +60,40 @@ local VERSION = "1"
 -- about debug.sethook is true, and the interpreter it describes is not what
 -- runs a hot loop here.
 --
+-- IT ALSO ONLY WORKS BECAUSE THE HOOK SIGNALS VIA assert, NOT error. Even
+-- with jit.off applied, `while true do end` still did not stop: the hook
+-- fired (confirmed by OBS's own log, ~500 times a second) but the loop kept
+-- running until the operator force-killed OBS. Cause: obs-scripting-lua.c's
+-- add_hook_functions() replaces the GLOBAL error and print with its own
+-- logging shims before this script is ever loaded, and nothing in this file
+-- is setfenv'd away from that global scope. So the hook's error(...) call
+-- was never actually raising an error -- it was calling OBS's shim, which
+-- logs (under OBS's own prefix, not this script's log()) and returns
+-- normally, same as a print statement. pcall had nothing to catch, and the
+-- interpreter just kept running the same loop. assert(false, msg) is
+-- unaffected: OBS never touches assert, and assert raises through the C API
+-- directly (lua_error / LuaJIT's lj_err_callermsg) rather than through the
+-- Lua-callable global error, so it keeps working regardless of what error
+-- currently is. Verified directly against OBS's own lua51.dll with error
+-- and print replaced exactly as add_hook_functions() replaces them:
+-- error(...) does not stop `while true do end` at all (still running after
+-- 8s); assert(false, ...) stops it in under a millisecond, every time.
+--
 -- What it still does not cover:
 --
 --   * A chunk that wraps its own loop in its own pcall (see run(), below)
---     catches the error this budget's hook raises just like any other error,
---     so the hook keeps firing and the chunk keeps running: Lua gives a hook
---     no way to raise an error a script-level pcall cannot catch, and a
---     coroutine would not help either, since a count hook cannot yield
---     across the C boundary.
+--     catches the error this budget's hook raises just like any other
+--     error. That alone would only cost the chunk one pass through the
+--     loop -- pcall does not resume what it caught, it ends the protected
+--     call -- but a chunk that RE-ENTERS pcall from an unprotected outer
+--     loop (`while true do pcall(risky) end`) gets a fresh protected call
+--     every pass, and the hook has no way to reach past that: it can only
+--     raise an error into the nearest pcall, and that pcall is the chunk's
+--     own. A coroutine does not change this either -- re-verified directly
+--     against the assert-based hook above, not assumed -- because wrapping
+--     the whole chunk in one only moves the OUTERMOST catch; it does
+--     nothing to whatever pcall the chunk installs for itself on the
+--     inside, which is the one actually catching each firing.
 --   * One long C call. The hook counts VM instructions, so time spent inside
 --     string.rep, a pathological string.find pattern or a blocking obslua
 --     call is not counted at all.
@@ -122,6 +162,16 @@ local function make_env(args)
 		tostring = tostring,
 		type = type,
 		unpack = unpack,
+		-- KNOWN LIMITATION, NOT FIXED HERE: this is OBS's replaced error (see
+		-- the INSTRUCTION_BUDGET comment above), so a chunk that calls
+		-- error("msg") to signal its own failure does not actually fail --
+		-- it logs to OBS's Script Log and the chunk keeps running past that
+		-- line, same as run()'s hook did before it switched to assert.
+		-- Giving chunks a working error() needs its own decision (whether to
+		-- reproduce error's position-prefixing, for one) rather than a
+		-- change folded into the instruction-budget fix. assert (below)
+		-- DOES work correctly for a chunk, exactly as it now does for the
+		-- hook, since OBS never touches it.
 		error = error,
 		assert = assert,
 		pcall = pcall,
@@ -248,10 +298,19 @@ local function run(source, args)
 
 	-- The hook is installed from out here, where debug is still reachable.
 	-- The chunk itself never sees it.
+	--
+	-- It signals with assert(false, msg), not error(msg). OBS replaces the
+	-- global error (and print) with its own logging shim before this script
+	-- ever loads, and nothing out here is setfenv'd away from that global
+	-- scope -- so error(...) does not raise in this file, it logs and
+	-- returns, same as OBS treats a bare print(). See the comment on
+	-- INSTRUCTION_BUDGET above for how that was found and verified. assert
+	-- is untouched by OBS and raises through the C API directly, so it
+	-- works regardless of what error currently is.
 	local tripped = false
 	debug.sethook(function()
 		tripped = true
-		error("the chunk exceeded its instruction budget", 2)
+		assert(false, "the chunk exceeded its instruction budget")
 	end, "", INSTRUCTION_BUDGET)
 
 	local ok, result = pcall(chunk)
