@@ -64,13 +64,20 @@ reserved against the general-purpose tools
 
 Stated accurately, and no more than that: the default binary contains no
 *unreviewed* eval path, and the transport's source names are reserved against
-every tool that addresses a source by name and writes it — `set_source_settings`,
-`ensure_input`, `remove_source`, `duplicate_source`, and the six typed creators.
-The creators were missed on the first pass, which is worth recording rather than
-quietly fixing: the guard went on `handleEnsureInput`, and `create_color_source`
-with `if_exists: "update"` reaches the same unexported worker underneath, past a
-kind check that cannot refuse it because the inbox really is a
-`color_source_v3`.
+every tool through which a caller names a source or a scene and something is
+written — nineteen of them.
+
+That list was got wrong twice by writing it out by hand, so it is no longer
+written out by hand. `internal/mcp/bridge_surface_test.go` drives every tool
+carrying a `source_name`, `scene_name`, `input_name` or `dest_scene_name` and
+fails for any that neither refuses a reserved name nor carries a written reason
+it need not. Nineteen refuse; twenty-two are exempt with a reason. The two
+misses it was built after are instructive: `create_color_source` with
+`if_exists: "update"` reached `ensureInput`, the unexported worker, past a kind
+check that could not refuse it because the inbox really is a `color_source_v3`;
+and eight more tools — the four filter ones, mute, volume, the properties
+button and `create_scene` — were each already refused through
+`call_obs_request` while their own typed tool let them through.
 
 **The two further routes this section used to name as open are now closed**, at
 their own layers rather than in `bridge_reserved.go`, because neither passes

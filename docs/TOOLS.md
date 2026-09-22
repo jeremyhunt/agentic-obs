@@ -3046,14 +3046,29 @@ a human to close OBS.
 ### The transport is reserved
 
 The bridge's two sources, `agentic-obs-inbox` and `agentic-obs-mailbox`, are
-refused by every tool that names a source and writes it: `set_source_settings`,
-`ensure_input`, `remove_source`, `duplicate_source`, and the six typed creators
-— `create_text_source`, `create_image_source`, `create_color_source`,
-`create_browser_source`, `create_media_source` and `create_audio_input`. In
-every build. Writing the first is running Lua; removing either breaks the
-bridge; creating one under those names collides with the real transport the day
-the bridge is installed. Reads are unaffected. Use `agentic-obs
-uninstall-bridge` to take the bridge out.
+refused by **every tool through which you name a source or a scene and something
+is written**, in every build. That is nineteen tools: `set_source_settings`,
+`ensure_input`, `remove_source`, `duplicate_source`, the six creators
+(`create_text_source`, `create_image_source`, `create_color_source`,
+`create_browser_source`, `create_media_source`, `create_audio_input`), the four
+filter tools (`create_source_filter`, `remove_source_filter`,
+`toggle_source_filter`, `set_source_filter_settings`), `toggle_input_mute`,
+`set_input_volume`, `press_source_properties_button`, `create_scene` and
+`remove_scene`.
+
+Not all of those are escalations. Writing the inbox's settings runs Lua;
+removing either source breaks the bridge; `create_scene` and `remove_scene` are
+refused because OBS keeps scenes and sources in one namespace, so a scene under
+that name collides with the transport. The filter, mute, volume and
+properties-button refusals reach none of that — they are refused so the rule is
+one rule, *agentic-obs does not write the transport*, rather than a judgement
+per tool about which writes happen to be harmless.
+
+Reads are unaffected, and neither are the writes that go through a scene item
+rather than the source: `set_source_transform`, `set_source_bounds`,
+`set_source_crop`, `set_source_locked`, `set_source_order` and
+`toggle_source_visibility` all still work on a placement of the transport, if
+one somehow exists. Use `agentic-obs uninstall-bridge` to take the bridge out.
 
 `call_obs_request` and `apply_scene_spec` are guarded too, each in its own way.
 The passthrough refuses any request whose payload addresses a reserved name —
@@ -3065,9 +3080,13 @@ or as a placement, once `dry_run=false`; it refuses the whole apply rather than
 skipping that one source, and dry runs and `diff_scene_spec` are unaffected
 because they write nothing.
 
-`apply_scene_preset` shares `apply_scene_spec`'s reconciler but is restricted to
-`fields: ["enabled"]`, under which the only write available is toggling the
-visibility of a placement OBS already holds — so it is not refused, and a scene
+That refusal is gated on what the apply can actually do, and the gate applies to
+`apply_scene_spec` too: a spec naming the transport goes through when `fields`
+is restricted to placement state — `enabled`, `locked`, `transform`,
+`blend_mode` or `order` — because under those the only writes available go
+through a scene item id and cannot reach a source. The four that can are
+`source`, `placement`, `settings` and `filters`. `apply_scene_preset` shares the
+same reconciler with `fields: ["enabled"]`, so it is never refused and a scene
 that somehow contains the transport stays appliable.
 
 What that adds up to: no tool here addresses the transport **by name or uuid**.

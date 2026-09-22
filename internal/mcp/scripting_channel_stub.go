@@ -14,8 +14,10 @@ package mcp
 // overstated the case. The bridge's transport is addressed by source name, so
 // a general-purpose settings write reaches it in any build; those two names
 // are reserved separately, in three places -- bridge_reserved.go for the tools
-// that address a source by name, internal/obs/dispatch.go for the raw
-// passthrough, and internal/scenespec/apply.go for a caller-supplied spec.
+// that name a source or a scene and write it, internal/obs/dispatch.go for the
+// raw passthrough, and internal/scenespec/apply.go for a caller-supplied spec.
+// bridge_surface_test.go is what keeps the first of those complete, since
+// enumerating it by hand was wrong three revisions running.
 //
 // Together those mean no tool in this build addresses the transport by name or
 // by uuid. What this file guarantees is still narrower, and narrower is the

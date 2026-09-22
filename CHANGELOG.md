@@ -16,23 +16,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   back ran arbitrary code inside OBS with no gate touched. `ensure_input` was
   the same write by another route.
 
-  `agentic-obs-inbox` and `agentic-obs-mailbox` are now refused by
-  `set_source_settings`, `ensure_input`, `remove_source`, `duplicate_source`
-  and the six typed creators (`create_text_source`, `create_image_source`,
-  `create_color_source`, `create_browser_source`, `create_media_source`,
-  `create_audio_input`). `remove_source` and `duplicate_source` are not an
-  escalation, but ADR-013 already listed deleting the inbox as a hazard that
-  breaks the bridge silently. Reads stay open — they expose nothing
-  `get_obs_status`'s `bridge` field does not already report.
+  `agentic-obs-inbox` and `agentic-obs-mailbox` are now refused by **every tool
+  through which a caller names a source or a scene and something is written** —
+  nineteen of them: `set_source_settings`, `ensure_input`, `remove_source`,
+  `duplicate_source`, the six creators (`create_text_source`,
+  `create_image_source`, `create_color_source`, `create_browser_source`,
+  `create_media_source`, `create_audio_input`), the four filter tools
+  (`create_source_filter`, `remove_source_filter`, `toggle_source_filter`,
+  `set_source_filter_settings`), `toggle_input_mute`, `set_input_volume`,
+  `press_source_properties_button`, `create_scene` and `remove_scene`. Reads
+  stay open, and so do the writes that go through a scene item rather than the
+  source — transform, bounds, crop, lock, order and visibility.
 
-  The creators were missed on the first pass and are worth naming rather than
-  folding in quietly. The guard went on `handleEnsureInput`, and
-  `create_color_source` with `if_exists: "update"` reaches `ensureInput` — the
-  unexported worker — through a kind check that cannot refuse it, because the
-  inbox really is a `color_source_v3`: that is what the bridge's Lua creates. So
-  a default-enabled Design tool placed the transport in a live scene and wrote
-  its settings. Not an eval route, since the creators build their own settings
-  maps and no `lua` key is reachable through them.
+  Only two of those are escalations. Everything else is refused so that the
+  reservation is *one rule* — agentic-obs does not write the transport — rather
+  than a judgement per tool about which writes happen to be harmless. That
+  judgement is what went wrong twice: the creators were missed once, then the
+  filter, audio, properties-button and scene tools the round after, and **every
+  one of them was already refused through `call_obs_request` while its own
+  typed tool let it through.** `create_scene` and `remove_scene` have a reason
+  of their own: OBS keeps scenes and sources in one namespace, so a scene named
+  `agentic-obs-inbox` collides with the transport.
+
+  Worth naming rather than folding in quietly: `create_color_source` with
+  `if_exists: "update"` matched the inbox exactly — it really is a
+  `color_source_v3`, which is what the bridge's Lua creates — and fell through
+  the kind check into `ensureInput`, the unexported worker that carries no
+  guard. A default-enabled Design tool therefore placed the transport in a live
+  scene and wrote its settings.
+
+- **Nothing keeps that list right except a test, now** —
+  `internal/mcp/bridge_surface_test.go` drives every tool carrying a
+  `source_name`, `scene_name`, `input_name` or `dest_scene_name` and fails for
+  any that neither refuses a reserved name nor carries a written reason it need
+  not. Nineteen refuse, twenty-two are exempt with a reason, and a twentieth
+  tool added without a guard fails the test rather than being found by the
+  round after. It is the tool-surface counterpart of the passthrough's
+  `TestEverySourceAddressingFieldMatchesTheKeyRule`, and it exists because a
+  hand-maintained list of guarded call sites was wrong three revisions running.
 
 - **`call_obs_request` reached the transport past that reservation** — the
   passthrough's deny-list keys on the request *type*, so `SetInputSettings`
@@ -119,8 +140,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The build tag is not the whole gate on its own: the transport is addressed by
   source name, so the two names are reserved separately (see Fixed, above).
   Accurately stated, the default binary contains no unreviewed eval path, and no
-  tool here addresses the transport by name or by uuid — not the ten that
-  address a source by name and write it, not `call_obs_request` and not
+  tool here addresses the transport by name or by uuid — not the nineteen that
+  name a source or scene and write it, not `call_obs_request` and not
   `apply_scene_spec`. What that does *not* say: the transport is not
   unreachable. A settings write that never names it reaches it as
   `set_source_settings` once did, `DuplicateSceneItem` addresses a placement by

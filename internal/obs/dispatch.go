@@ -205,24 +205,37 @@ func checkRequestAllowed(requestType string, requestData map[string]interface{},
 // checkBridgeTransportTarget refuses a request that aims at the Lua bridge's
 // transport.
 //
-// The requirement is that no call_obs_request may write, create, rename, remove
-// or place a reserved transport source. Reads stay open, and "read" is decided
-// structurally rather than from a table: obs-websocket names every read Get*
-// and nothing else, so a request that is not a Get* is treated as a write. The
-// failure direction is deliberate -- a request this build has never seen falls
-// on the refusing side.
+// The requirement is that no call_obs_request may NAME a reserved transport
+// source and act on it -- write, create, rename, remove or place. A request
+// that reaches an existing placement by numeric sceneItemId is outside that:
+// DuplicateSceneItem copies a placement without naming anything, and
+// sourceRefsIn reads strings. It writes no settings, so it is not an eval
+// route, but it is not refused and the scope should not be overstated.
+//
+// Reads stay open, and "read" is decided structurally rather than from a table:
+// obs-websocket names every read Get* and nothing else, so a request that is
+// not a Get* is treated as a write. The failure direction is deliberate -- a
+// request this build has never seen falls on the refusing side.
 //
 // What is checked is every source-addressing value in the payload, found by the
 // shape of the key rather than by a list of the three field names that matter
 // today (inputName, newInputName, sourceName). Scanning every string value
 // instead would refuse SetInputSettings on a text source whose text happens to
 // be "agentic-obs-inbox"; keying on *Name/*Uuid refuses nothing a caller would
-// plausibly send, and covers sceneName, newInputName, destinationSceneName and
-// whatever the next OBS release adds without this function being edited.
+// plausibly send, and covers sceneName, newInputName and destinationSceneName
+// without this function being edited.
 //
-// This closes addressing the transport through this tool. It is not a boundary
-// against whoever holds the obs-websocket password, who can issue the same
-// request directly.
+// That rule is exhaustive against goobs 1.8.3 rather than merely broad -- the
+// params structs CallRequest marshals into drop fields they do not declare, so
+// what a caller can address is exactly what goobs declares, and every declared
+// field mentioning a name or a uuid matches. It is NOT exhaustive against an
+// arbitrary spelling: a field called inputNameList would be missed.
+// TestEverySourceAddressingFieldMatchesTheKeyRule is what reports that rather
+// than leaving the guard quietly blind to it.
+//
+// This closes addressing the transport by name or by uuid through this tool. It
+// is not a boundary against whoever holds the obs-websocket password, who can
+// issue the same request directly.
 func checkBridgeTransportTarget(requestType string, requestData map[string]interface{}, transportUUIDs func() (map[string]string, error)) error {
 	if len(requestData) == 0 || strings.HasPrefix(requestType, "Get") {
 		return nil

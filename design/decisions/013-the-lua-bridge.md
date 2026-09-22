@@ -155,15 +155,45 @@ without the scripting channel's build tag, environment variable or per-call
 confirmation. `set_source_settings` did exactly that, from the default-enabled
 Sources group.
 
-The two names are therefore refused by every tool that names a source and writes
-it: the general-purpose ones — `set_source_settings`, `ensure_input`,
-`remove_source`, `duplicate_source` — and the six typed creators, five of which
-share `createTypedSource` and one of which (`create_audio_input`) does not.
-The creators are not an eval route, since they build their own settings maps,
-but `create_color_source` with `if_exists: "update"` matched the inbox exactly —
-it really is a `color_source_v3`, which is what the Lua creates — and fell
-through the kind check into `ensureInput`, the unexported worker that carries no
-guard of its own. The guards are in `internal/mcp/bridge_reserved.go`, compared
+The two names are therefore refused by **every tool through which a caller names
+a source or a scene and something is written** — nineteen of them as this is
+written, and the number is deliberately not the point. Three successive
+revisions of this paragraph named a count and were wrong within a round:
+`create_audio_input` was missed once, then `create_source_filter`,
+`remove_source_filter`, `toggle_source_filter`, `set_source_filter_settings`,
+`toggle_input_mute`, `set_input_volume`, `press_source_properties_button`,
+`create_scene` and `remove_scene` were missed the round after. Every one of
+those was already refused through `call_obs_request` and allowed through its own
+typed tool, so the passthrough and the tool surface disagreed about the same OBS
+request.
+
+**So the list is not maintained by hand any more.**
+`internal/mcp/bridge_surface_test.go` drives every tool that lets a caller name
+a source or a scene and fails for any that neither refuses nor carries a written
+reason it need not — nineteen refusals and twenty-two reasoned exemptions, each
+checked by calling the tool rather than by reading its schema. Adding a twentieth
+tool without a guard fails that test. It is the tool-surface counterpart of
+ADR-012's `TestEverySourceAddressingFieldMatchesTheKeyRule`, and it exists
+because a list of guarded call sites is not a property, it is a thing someone
+has to keep remembering.
+
+Two of those refusals are worth their own sentence. The typed creators are not
+an eval route, since they build their own settings maps, but
+`create_color_source` with `if_exists: "update"` matched the inbox exactly — it
+really is a `color_source_v3`, which is what the Lua creates — and fell through
+the kind check into `ensureInput`, the unexported worker that carries no guard.
+And `create_scene`/`remove_scene` are refused because OBS keeps scenes and
+sources in **one** namespace: a scene called `agentic-obs-inbox` collides with
+the transport rather than sitting beside it.
+
+The filter, mute, volume and properties-button refusals do not stop an
+escalation — none of them reaches the inbox's settings, and only a settings
+write raises the `update` signal the Lua listens for. They are refused so that
+the reservation is *one rule* — agentic-obs does not write the transport —
+rather than a per-tool judgement about which writes happen to be harmless. That
+judgement is precisely what was got wrong twice.
+
+The guards are in `internal/mcp/bridge_reserved.go`, compared
 against `obs.IsBridgeTransport` so a rename cannot leave a stale literal behind. The two
 literals live in `internal/obs` rather than in `internal/bridge`, because
 `internal/bridge` imports `internal/obs` and the passthrough's guard is in
