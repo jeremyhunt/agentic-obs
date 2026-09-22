@@ -34,10 +34,19 @@ chunk, so a bare error(...) call anywhere else in here, jit.off or not,
 was never actually raising anything: it was logging, under OBS's own
 prefix rather than this script's, and letting execution carry on. That
 defeated the budget completely even after jit.off fixed the tracing problem
-above -- see the comment on INSTRUCTION_BUDGET and run() for the fix
-(assert, which OBS does not touch) and for the one place this still bites
-(a chunk's own error() call, which the sandbox intentionally exposes and
-which is not fixed by that same change).
+above -- see the comment on INSTRUCTION_BUDGET and run() for that fix
+(assert, which OBS does not touch).
+
+The sandboxed CHUNK'S OWN error() had the identical problem for the
+identical reason: make_env() used to hand chunks error = error, and by the
+time this script loads that global is already OBS's shim, so a chunk
+calling error("boom") to signal its own failure logged the message and
+pcall(chunk) saw a normal return -- a failed call reporting success. Fixed
+the same way error() is fixed for run()'s own hook: bridge_error(), defined
+just above make_env below, builds a working error() out of assert instead
+of handing the shimmed global straight through. See the comment on
+bridge_error for what it does and does not reproduce of real error()'s
+behavior.
 ]]
 
 obs = obslua
@@ -143,6 +152,80 @@ end
 -- This shrinks what a mistake can reach. It is not a boundary against an
 -- attacker: Lua sandbox escapes are a known class, and anyone holding the
 -- obs-websocket password could load their own script anyway.
+
+-- bridge_error is what the sandbox hands a chunk as error(). By the time this
+-- script loads, OBS's add_hook_functions() has already replaced the real
+-- global error with its own logging shim (see the header comment and
+-- INSTRUCTION_BUDGET above), so simply exposing error = error, as make_env()
+-- used to, handed chunks OBS's shim: error("boom") logged to OBS's Script Log
+-- and returned normally, so pcall(chunk) saw a normal return and a failed
+-- chunk reported ok=true.
+--
+-- Defined out here rather than inline in make_env's returned table, so it
+-- keeps THIS scope's debug and assert -- both real, since OBS only ever
+-- touches error and print -- no matter what setfenv does to the chunk that
+-- calls it. A Lua 5.1 closure's environment is fixed to whatever was current
+-- when the closure was created, not to its caller's, so a chunk invoking
+-- this through its own sandboxed env still runs it against the real globals.
+--
+-- assert is the actual raise, the same way run()'s budget hook signals:
+-- assert is never touched by OBS's shim and raises through the C API
+-- directly (lua_error / LuaJIT's lj_err_callermsg), so it works no matter
+-- what error currently is.
+--
+-- IT MUST BE A TAIL CALL -- `return assert(...)`, not a bare `assert(...)`
+-- statement. assert(false, message) does not just raise message unchanged:
+-- for a string (or number) message it ALSO adds its OWN position prefix,
+-- unconditionally, blaming whichever Lua function directly called assert.
+-- Called as a plain statement from in here, that caller is always this
+-- function, so every message would be prefixed with THIS line, forever,
+-- regardless of what the chunk actually did. Written as a tail call instead,
+-- this function's own stack frame is gone by the time assert goes looking
+-- for someone to blame, so assert attributes the prefix to WHATEVER CALLED
+-- bridge_error instead -- which is always exactly wherever the chunk itself
+-- wrote error(...). That is real error()'s DEFAULT (level 1) behavior,
+-- exactly, with no extra code needed to compute it. Verified directly
+-- against the real DLL: a plain `assert(false, msg)` statement inside a
+-- wrapper prefixes with the wrapper's own fixed line every time; the
+-- identical call written as `return assert(false, msg)` instead prefixes
+-- with whatever called the wrapper, however deep the chunk's own call
+-- stack is above that point.
+--
+-- A table (or other non-string, non-number) message is exempt from that
+-- prefixing altogether and passed through completely unchanged, tail call
+-- or not -- confirmed against the real DLL -- which is what lets a
+-- structured error object like {code = 5} survive the trip as a table,
+-- not a stringified approximation of one.
+--
+-- What this does NOT reproduce, stated rather than hidden: the level
+-- argument itself. Real error(msg, level) lets a caller blame an arbitrary
+-- stack level, or pass 0 to suppress the prefix entirely. assert -- the
+-- only unshimmed raising primitive available here -- offers no such knob:
+-- whatever position it attributes a string (or number) message to is fixed
+-- by where assert is actually (tail-)called from, not by any argument.
+-- level is still accepted, so a chunk that passes one does not hit a
+-- surprising arity mismatch, but it has NO EFFECT: level 0 does not
+-- suppress the prefix, and level 2+ does not move it to a different frame
+-- -- every string/number message gets exactly the level-1 prefix above,
+-- always. This was tried the other way first -- computing the requested
+-- level's position by hand with debug.getinfo, then handing the
+-- already-prefixed string to assert -- and rejected: assert's own
+-- automatic prefix still applies on top of a hand-built one exactly as it
+-- does on top of a plain message, producing a confusing double prefix for
+-- level 1 and a flatly wrong one for level 0 or 2+ (assert's own prefix
+-- always names the level-1 position, whatever the hand-built one said).
+-- Covering the overwhelming common case -- a bare error("message"), which
+-- means level 1 -- exactly, and being honest here about not covering the
+-- rest, beat a fragile attempt at the rest that would have undermined the
+-- common case too. See the LuaJIT report this shipped with for the
+-- empirical trail, including the level-0 and level-2 cases as tried and
+-- reverted.
+local function bridge_error(message, level)
+	-- level kept in the signature to match error(message, level)'s shape --
+	-- see the comment above for why it is read no further than this.
+	return assert(false, message)
+end
+
 local function make_env(args)
 	return {
 		obslua = obs,
@@ -162,17 +245,11 @@ local function make_env(args)
 		tostring = tostring,
 		type = type,
 		unpack = unpack,
-		-- KNOWN LIMITATION, NOT FIXED HERE: this is OBS's replaced error (see
-		-- the INSTRUCTION_BUDGET comment above), so a chunk that calls
-		-- error("msg") to signal its own failure does not actually fail --
-		-- it logs to OBS's Script Log and the chunk keeps running past that
-		-- line, same as run()'s hook did before it switched to assert.
-		-- Giving chunks a working error() needs its own decision (whether to
-		-- reproduce error's position-prefixing, for one) rather than a
-		-- change folded into the instruction-budget fix. assert (below)
-		-- DOES work correctly for a chunk, exactly as it now does for the
-		-- hook, since OBS never touches it.
-		error = error,
+		-- error is bridge_error (defined above), not OBS's own shimmed
+		-- global -- see the comment there for why that is necessary and what
+		-- it does not reproduce exactly. assert, pcall and xpcall are all
+		-- untouched by OBS's shim and are handed through as-is.
+		error = bridge_error,
 		assert = assert,
 		pcall = pcall,
 		xpcall = xpcall,

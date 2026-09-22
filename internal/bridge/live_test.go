@@ -23,6 +23,15 @@
 // process still had to be killed by hand. The bridge now signals with
 // assert instead, which OBS does not touch. See the comment on
 // INSTRUCTION_BUDGET in bridge/agentic-obs-bridge.lua.
+//
+// The same replacement broke a CHUNK's own error() call the identical way,
+// which TestLiveBridgeFailureDoesNotCarryThePreviousResult below caught: its
+// second call raises error("the second call fails") to produce a failure to
+// test against, and against a real OBS that call used to log and keep
+// running instead of failing, so the test failed for a true reason rather
+// than a wrong one. The sandbox's error is now bridge_error, built on assert
+// the same way -- see the comment on bridge_error in
+// bridge/agentic-obs-bridge.lua for why it has to be a tail call.
 package bridge_test
 
 import (
