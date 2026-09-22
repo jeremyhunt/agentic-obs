@@ -80,8 +80,8 @@ chunk returns.
   args  Data the chunk reads as the args table. Put parameters here; building
         them into the source is how a scene name becomes code.
 
-The chunk runs sandboxed: obslua is available; os, io, package, debug and the
-loadstring/setfenv family are not.
+The chunk runs sandboxed: obslua is available; os, io, package, debug,
+LuaJIT's own ffi/jit/bit, and the loadstring/setfenv family are not.
 
 What comes back:
 
@@ -92,10 +92,14 @@ What comes back:
   * Limits are failures, never truncation: deeper than 8 levels, or over 64 KB
     (keys counted too), comes back ok=false -- as does a function or userdata.
 
-It runs on OBS's render thread, so a slow chunk drops frames. A chunk is
-interrupted after 2,000,000 instructions, which stops an ordinary runaway loop
--- but a loop inside the chunk's own pcall catches that interruption and keeps
-running, and OBS stays wedged until someone closes it.`
+It runs on OBS's render thread, so a slow chunk drops frames. OBS's Lua is
+LuaJIT, which stops checking an instruction hook the moment a loop compiles to
+native code, so every chunk runs interpreted (jit.off) to keep the budget
+below real. A chunk is interrupted after 2,000,000 instructions, which stops
+an ordinary runaway loop -- but a loop inside the chunk's own pcall catches
+that interruption and keeps running, or one spent inside a single long call
+(e.g. string.rep) is not counted at all, and OBS stays wedged until someone
+closes it.`
 
 func registerScriptingChannel(s *Server) {
 	if !scriptingEnabled() {

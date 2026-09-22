@@ -111,6 +111,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   same reconciler with `fields: ["enabled"]`, and a spec addresses a placement as
   source plus occurrence. Both placements land.
 
+- **The Lua bridge's instruction budget did not stop a runaway chunk** — a
+  live test against a real OBS found that `while true do end`, a plain
+  infinite loop with no `pcall` of its own, ran unbounded and pegged the video
+  thread at 7.31 CPU-seconds in 5 wall-seconds, needing a force-stop.
+
+  The cause: OBS's Lua is LuaJIT, not vanilla Lua 5.1. `obslua` ships as
+  `lua51.dll` because LuaJIT is Lua-5.1-ABI-compatible, so the filename, the
+  syntax and the manual all say "5.1" — which is exactly why this went
+  unnoticed, since reviewing the bridge against the Lua 5.1 manual could not
+  have caught it. LuaJIT checks a `debug.sethook` count hook in its bytecode
+  interpreter only; once a loop compiles into a trace, at roughly 56
+  iterations, the trace is native code that never looks at the hook again, so
+  the budget's hook fired zero times.
+
+  `run()` now calls `jit.off(chunk, true)` before executing anything, which
+  keeps the chunk interpreted so the hook stays live. The recursive argument
+  is what covers a loop the chunk hides inside a function of its own, and
+  since the sandbox withholds `load` and `loadstring`, a chunk's nested
+  function prototypes are all the Lua it can ever hand the interpreter — so
+  `jit.off(chunk, true)` reaches everything a chunk could compile. What the
+  budget still does not cover is unchanged from ADR-013: a chunk that wraps
+  its own loop in its own `pcall`, and one long C call (`string.rep`, a
+  pathological `string.find` pattern, a blocking `obslua` call), since the
+  hook counts VM instructions rather than wall time. See
+  [ADR-013](design/decisions/013-the-lua-bridge.md).
+
+  The same live test added `ffi`, `jit` and `bit` — LuaJIT's own — to the
+  sandbox's withheld list. `ffi` is the one that matters: `ffi.cdef` plus
+  `ffi.load` reach any DLL on the machine, a bigger hole than `os.execute`.
+
 ### Added
 - **The Lua bridge** — agentic-obs can run code inside the OBS process, over a
   pair of source-settings mailboxes. Both directions are push and the round

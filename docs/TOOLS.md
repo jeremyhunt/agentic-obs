@@ -3018,17 +3018,26 @@ OBS process, on the render thread, through the bridge.
 | `args` | object | Data the chunk reads as `args`. Pass parameters here; never build them into `lua`. |
 
 The chunk runs in a sandbox: `obslua` is available, `os`, `io`, `package`,
-`debug` and the `loadstring`/`setfenv` family are not. Every call asks for
-confirmation and the full source is written to action history.
+`debug`, LuaJIT's own `ffi`/`jit`/`bit`, and the `loadstring`/`setfenv` family
+are not. Every call asks for confirmation and the full source is written to
+action history.
 
-**The instruction budget is not a hard bound.** A chunk is interrupted after
-2,000,000 instructions, which stops an *ordinary* runaway loop — but a chunk
-whose loop sits inside its own `pcall` catches that interruption like any other
-error, the hook re-arms, and the loop continues with no upper bound while OBS's
-render thread stays wedged. Lua 5.1 gives a hook no way to raise an error a
-script-level `pcall` cannot catch. The 2-second transport timeout then lets
-agentic-obs report the failure; it does not free OBS. Recovering from that needs
-a human to close OBS.
+**The instruction budget is not a hard bound.** OBS's Lua is LuaJIT (Lua 5.1
+ABI-compatible, shipped as `lua51.dll`), and a LuaJIT count hook is checked by
+the interpreter only — once a loop compiles into a trace, the hook is never
+consulted again. `run()` keeps every chunk interpreted with `jit.off(chunk,
+true)` specifically so the budget has any effect at all; without it, a plain
+`while true do end` ran unbounded and pegged OBS's video thread until it was
+force-stopped. Interpreted, a chunk is interrupted after 2,000,000
+instructions, which stops an *ordinary* runaway loop — but a chunk whose loop
+sits inside its own `pcall` catches that interruption like any other error,
+the hook re-arms, and the loop continues with no upper bound while OBS's
+render thread stays wedged. Nor does it cover one long C call, such as
+`string.rep` or a blocking `obslua` call, since the hook counts VM
+instructions rather than wall time. LuaJIT gives a hook no way to raise an
+error a script-level `pcall` cannot catch. The 2-second transport timeout then
+lets agentic-obs report the failure; it does not free OBS. Recovering from
+that needs a human to close OBS.
 
 ### What comes back
 

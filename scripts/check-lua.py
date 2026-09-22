@@ -1,4 +1,6 @@
-"""Syntax-check Lua files against the Lua 5.1 that OBS itself runs.
+"""Syntax-check Lua files against the Lua OBS itself runs: LuaJIT under a Lua
+5.1 ABI, not vanilla Lua 5.1 (see ADR-013) -- shipped as lua51.dll for that
+reason.
 
 No Lua interpreter is installed, and CGO is out (ADR-001), so a Go test cannot
 parse these. OBS ships lua51.dll, which is the exact parser that matters.
