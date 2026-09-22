@@ -17,6 +17,13 @@ synchronous, so nothing runs to fire one until the chunk returns control. The
 instruction budget below stands in for a timer instead, but it only bounds an
 ordinary runaway loop -- see the comment on INSTRUCTION_BUDGET for what it
 does not cover.
+
+THE INTERPRETER IS LuaJIT, NOT VANILLA LUA 5.1. OBS ships it as lua51.dll
+because LuaJIT is Lua 5.1 ABI-compatible, and that is exactly why it goes
+unnoticed: the filename, the syntax and the manual all say 5.1. It matters
+because LuaJIT compiles hot code, and a compiled trace never consults a debug
+hook -- so run() must call jit.off on every chunk or the budget below does
+nothing at all. Verified against OBS's own lua51.dll: LuaJIT 2.1.1736781742.
 ]]
 
 obs = obslua
@@ -27,13 +34,32 @@ local VERSION = "1"
 
 -- A frame's worth of work, near enough. Not a security control: it stops an
 -- ordinary runaway loop, the way FB-86 stops a runaway rule -- but it is not
--- a hard bound. A chunk that wraps its own loop in its own pcall (see run(),
--- below) catches the error this budget's hook raises just like any other
--- error, so the hook keeps firing and the chunk keeps running: Lua 5.1 gives
--- a hook no way to raise an error a script-level pcall cannot catch, and a
--- coroutine would not help either, since a count hook cannot yield across
--- the C boundary. When that happens OBS itself stays blocked with no upper
--- bound, and the real backstop is the Go side's 2s transport timeout
+-- a hard bound.
+--
+-- IT WORKS ONLY BECAUSE run() CALLS jit.off ON THE CHUNK. A count hook is
+-- checked by LuaJIT's interpreter and by nothing else; once a loop is
+-- compiled into a trace, the trace is native code that never looks at the
+-- hook again. LuaJIT compiles a loop after about 56 iterations, so before
+-- jit.off the hook fired exactly zero times on `while true do end` and the
+-- chunk pegged the video thread until the operator killed OBS. Reasoning
+-- from the Lua 5.1 manual is the trap that let that ship: every word of it
+-- about debug.sethook is true, and the interpreter it describes is not what
+-- runs a hot loop here.
+--
+-- What it still does not cover:
+--
+--   * A chunk that wraps its own loop in its own pcall (see run(), below)
+--     catches the error this budget's hook raises just like any other error,
+--     so the hook keeps firing and the chunk keeps running: Lua gives a hook
+--     no way to raise an error a script-level pcall cannot catch, and a
+--     coroutine would not help either, since a count hook cannot yield
+--     across the C boundary.
+--   * One long C call. The hook counts VM instructions, so time spent inside
+--     string.rep, a pathological string.find pattern or a blocking obslua
+--     call is not counted at all.
+--
+-- When either happens OBS itself stays blocked with no upper bound, and the
+-- real backstop is the Go side's 2s transport timeout
 -- (internal/bridge/transport.go), which lets agentic-obs recover and report
 -- failure even while OBS stays wedged. A bridge that was not itself Lua
 -- could close this gap; this one cannot.
@@ -64,6 +90,15 @@ end
 --   the raw*/…metatable family -- getmetatable("") reaches the shared string
 --                     metatable, so a chunk could poison every string in the
 --                     process for every other script OBS has loaded
+--   ffi, jit, bit     -- LuaJIT's own. ffi is the serious one: ffi.cdef plus
+--                     ffi.load reach any DLL on the machine, which is a
+--                     bigger hole than os.execute. obs-scripting-lua.c calls
+--                     luaopen_ffi(script) right after luaL_openlibs, so the
+--                     ffi table is live in this process -- as
+--                     package.loaded.ffi rather than a global, which is why
+--                     withholding package and require is what actually
+--                     closes the route, and why this table must never grow
+--                     either of them back.
 --
 -- This shrinks what a mistake can reach. It is not a boundary against an
 -- attacker: Lua sandbox escapes are a known class, and anyone holding the
@@ -185,6 +220,31 @@ local function run(source, args)
 	end
 
 	setfenv(chunk, make_env(args))
+
+	-- Keep the chunk interpreted, or the budget below is decoration. LuaJIT
+	-- checks a count hook in the interpreter only, so the first hot loop gets
+	-- compiled and the hook is never consulted again. The second argument
+	-- recurses into the chunk's nested function prototypes, which is what
+	-- covers a loop the chunk hides inside a function of its own -- and since
+	-- the sandbox withholds load and loadstring, those prototypes are all the
+	-- Lua code a chunk can reach. Everything else it can call is a C function,
+	-- which LuaJIT cannot trace into anyway.
+	--
+	-- Pass literal true, never a variable that might hold false: checked
+	-- directly against this DLL, jit.off(chunk, false) recurses exactly like
+	-- jit.off(chunk, true) -- LuaJIT recurses whenever a second argument is
+	-- present at all, regardless of what it is. Only a one-argument
+	-- jit.off(chunk) is non-recursive, and that is not this call.
+	--
+	-- The cost is real: interpreted arithmetic measured 2-3x slower than
+	-- compiled on this machine. Chunks are meant to be short, and one long
+	-- enough for that to matter is already dropping frames.
+	--
+	-- Guarded so the script still loads under a vanilla Lua 5.1 that has no
+	-- jit table.
+	if jit then
+		jit.off(chunk, true)
+	end
 
 	-- The hook is installed from out here, where debug is still reachable.
 	-- The chunk itself never sees it.

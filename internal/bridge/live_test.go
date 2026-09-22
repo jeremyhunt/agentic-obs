@@ -4,8 +4,15 @@
 //
 // The sandbox tests are the reason this file exists. CGO is out (ADR-001), so
 // Go cannot reach the Lua directly -- and a sandbox asserted against a mock
-// proves nothing about Lua 5.1. Shipping "return os == nil" over the real
-// transport tests the real interpreter.
+// proves nothing about the interpreter that enforces it. Shipping
+// "return os == nil" over the real transport tests the real one.
+//
+// The real one is LuaJIT 2.1, not vanilla Lua 5.1: OBS ships it as lua51.dll
+// because it is Lua 5.1 ABI-compatible. That difference is not cosmetic --
+// TestLiveBridgeBoundsRunawayChunks below failed the first time this file was
+// run against a real OBS, because a LuaJIT trace does not check the count hook
+// the budget is built from, and reviewing the bridge against the Lua 5.1
+// manual could not have caught it.
 package bridge_test
 
 import (
@@ -95,7 +102,11 @@ func TestLiveBridgeSandboxWithholdsTheMachine(t *testing.T) {
 	// coroutine.wrap is a way to run code the count hook cannot interrupt;
 	// rawequal/newproxy reach the metatable machinery the raw* family is kept
 	// out for; collectgarbage can stall the render thread on its own.
-	for _, name := range []string{"os", "io", "package", "require", "dofile", "loadfile", "loadstring", "load", "debug", "setfenv", "getfenv", "getmetatable", "setmetatable", "rawset", "rawget", "_G", "coroutine", "rawequal", "collectgarbage", "newproxy"} {
+	//
+	// ffi, jit and bit are LuaJIT's, and the interpreter is LuaJIT. ffi is the
+	// one that matters: ffi.cdef plus ffi.load reach any DLL on the machine,
+	// which is worse than the os.execute this list already withholds.
+	for _, name := range []string{"os", "io", "package", "require", "dofile", "loadfile", "loadstring", "load", "debug", "setfenv", "getfenv", "getmetatable", "setmetatable", "rawset", "rawget", "_G", "coroutine", "rawequal", "collectgarbage", "newproxy", "ffi", "jit", "bit"} {
 		t.Run(name, func(t *testing.T) {
 			got, err := transport.Run(context.Background(), "return "+name+" == nil", nil)
 			if err != nil {
