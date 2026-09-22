@@ -3038,9 +3038,19 @@ logs the message and returns normally instead of raising, so the hook used to
 fire — confirmed in OBS's own log — while the loop it was supposed to stop
 kept running regardless, until forced closed. `assert` is untouched by that
 replacement and raises through the C API directly. The same replacement means
-a *chunk's* own `error()` call, which the sandbox otherwise permits, still
-only logs rather than failing the call that made it — a known, separate gap
-from the instruction budget.
+a *chunk's* own `error()` call, which the sandbox otherwise permits, needed
+the identical fix: the chunk's `error` is a wrapper (`bridge_error`) built on
+`assert` too, not the real global, so `error("boom")` now fails the call
+instead of only logging it. `assert` also prefixes a string or number message
+with the position of whatever called it, with no way to suppress or redirect
+that — `bridge_error` calls it as a tail call specifically so that position
+lands on the chunk's own `error(...)` line rather than on a fixed line inside
+the bridge script. The `level` argument real `error()` takes is accepted but
+not honored: every message still gets that same one position (real `error`'s
+default, "level 1"), never suppressed (`level 0`) or moved to a different
+frame (`level 2+`). A table (or other non-string, non-number) value passed to
+`error()` is exempt from any of this and comes back intact as a failure, not
+stringified.
 
 Fixed, a chunk is interrupted after 2,000,000 instructions, which stops an
 *ordinary* runaway loop — but a chunk whose loop sits inside its own `pcall`,

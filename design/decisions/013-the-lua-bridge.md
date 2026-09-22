@@ -172,13 +172,57 @@ OBS's `lua51.dll` with `error` and `print` replaced exactly as
 committed): the pre-fix hook does not stop `while true do end` at all inside
 an 8-second bound; the `assert`-based one stops it in under a millisecond,
 repeatably. The same replacement means a **chunk's own** `error()` call —
-which the sandbox deliberately exposes — has the identical problem and is
-*not* fixed by this change: a chunk that calls `error("something failed")` to
-signal its own failure logs to OBS's Script Log and keeps running past that
-line rather than failing the call. That is a separate, pre-existing defect
-from the instruction budget, newly surfaced by this same investigation and
-left unresolved here — see the comment beside `error = error` in
-`make_env()`.
+which the sandbox deliberately exposes — has the identical problem: a chunk
+that calls `error("something failed")` to signal its own failure used to log
+to OBS's Script Log and keep running past that line rather than failing the
+call, which meant a caller — an MCP tool handing the result to a model — was
+told a failed operation succeeded.
+
+**Fixed the same way, with one extra wrinkle a bare re-use of `assert`
+doesn't have.** `make_env()` now hands a chunk `bridge_error(message, level)`
+instead of the real `error`, and `bridge_error` raises through `assert` —
+but as `return assert(false, message)`, a genuine tail call, not a plain
+`assert(false, message)` statement. That distinction turned out to matter:
+`assert` itself also prefixes a string (or number) message with its own
+caller's position, unconditionally, with no argument to suppress or redirect
+it — a plain statement raises with *this function's own* fixed line prefixed
+onto whatever position this function might otherwise have computed by hand,
+producing a confusing double prefix. Written as a tail call instead,
+`bridge_error`'s own stack frame is gone by the time `assert` goes looking
+for someone to blame, so `assert` attributes its prefix to whatever called
+`bridge_error` — which is always exactly wherever the chunk itself wrote
+`error(...)`. That is real `error()`'s default (level 1) behavior, exactly,
+with no manual position-tracking code needed at all. A table (or other
+non-string, non-number) message is exempt from `assert`'s prefixing
+altogether, tail call or not, which is what lets a structured error object
+like `{code = 5}` survive the round trip as a table rather than a stringified
+approximation of one. Verified directly against OBS's `lua51.dll`, the same
+way as above: a chunk's own `error("boom")` now surfaces as `ok=false` with
+the message; a chunk's own `error({code = 5})` surfaces as `ok=false` with
+the table intact up to `run()`'s existing `tostring(result)` conversion on
+the failure path (unchanged by this fix); a chunk's own `pcall` around its
+own `error(...)` still catches it and lets the chunk continue, exactly as
+plain Lua would.
+
+**What this does not reproduce: the `level` argument itself.** Real
+`error(msg, level)` lets a caller blame an arbitrary stack level, or pass `0`
+to suppress the position prefix entirely. `assert` — the only unshimmed
+raising primitive available here — offers no such control: whatever position
+it attributes a string or number message to is fixed by where `assert` is
+actually (tail-)called from, not by any argument, so `level` is accepted (a
+chunk passing one does not hit a surprising arity mismatch) but not honored
+— every string or number message gets exactly the level-1 prefix described
+above, regardless of what level the chunk asked for. The alternative —
+computing the requested level's position by hand with `debug.getinfo`, then
+handing the already-prefixed string to `assert` — was tried first and
+rejected: `assert`'s own automatic prefix still applies on top of a
+hand-built one exactly as it does on top of a plain message, producing a
+double prefix at level 1 and a flatly wrong one at level 0 or 2+, since
+`assert`'s own prefix always names the level-1 position regardless of what
+the hand-built one said. Reproducing the overwhelming common case — a bare
+`error("message")`, which means level 1 — exactly, and disclosing the rest
+here rather than hiding it, beat a fragile attempt at full level support that
+would have undermined the common case too.
 
 Even fixed twice over, it is not a hard bound, and an earlier draft of this
 ADR said it was. A chunk that wraps its own loop in its own `pcall` catches
@@ -400,8 +444,21 @@ does not say.
   force-stopped a second time. `run()` now signals with `assert(false, msg)`,
   which OBS does not touch and which raises through the C API directly. The
   same replacement means a chunk's own `error()` call — which the sandbox
-  deliberately exposes — still only logs rather than failing the call; that
-  is a separate, pre-existing defect this fix does not resolve.
+  deliberately exposes — had the identical problem; `make_env()` now hands
+  chunks `bridge_error`, built the same way, in place of the real `error`.
+- **`bridge_error` cannot honor the `level` argument real `error()` takes.**
+  `assert` — the only unshimmed raising primitive available for either fix —
+  also prefixes a string or number message with its own caller's position,
+  unconditionally, and offers no argument to suppress or redirect that.
+  `bridge_error` raises through `assert` as a tail call specifically so that
+  automatic prefix lands on wherever the chunk itself called `error(...)`
+  (real `error()`'s default, level 1) rather than on `bridge_error`'s own
+  fixed line, but that trick only ever produces the level-1 position: `level
+  0` (suppress the prefix) and `level 2+` (blame a different frame) are
+  accepted, so a chunk that passes one does not hit a surprising arity
+  mismatch, but silently treated as level 1 regardless. A non-string,
+  non-number message (a table, for signaling a structured error) is exempt
+  from any of this and always passes through unchanged.
 - **Even fixed twice over, the instruction bound is not a hard bound.** It
   stops an ordinary runaway loop and nothing more: a chunk that re-enters its
   own `pcall` from an unprotected outer loop gets a fresh protected call every

@@ -98,12 +98,17 @@ native code, so every chunk runs interpreted (jit.off) to keep the budget
 below real. OBS also replaces the global error/print with logging shims
 before a script loads, so the budget signals via assert rather than error --
 error would silently log and let the chunk keep running instead of stopping
-it, and the same shim means a chunk's own error() call only logs rather than
-failing the call that made it. A chunk is interrupted after 2,000,000
-instructions, which stops an ordinary runaway loop -- but a loop the chunk
-re-enters via its own pcall (in an unprotected outer loop of its own) catches
-that interruption every time and keeps running, or one spent inside a single
-long call (e.g. string.rep) is not counted at all, and OBS stays wedged until
+it. A chunk's own error() needed the same fix: it now runs through a wrapper
+built on assert too, so error("boom") fails the call instead of only logging
+it -- but the level argument real error() takes is accepted, not honored:
+every message gets the position of its own error() call (real error()'s
+default), never suppressed (level 0) or moved to a different frame (level
+2+). A table passed to error() is unaffected by any of this and comes back
+intact as a failure. A chunk is interrupted after 2,000,000 instructions,
+which stops an ordinary runaway loop -- but a loop the chunk re-enters via
+its own pcall (in an unprotected outer loop of its own) catches that
+interruption every time and keeps running, or one spent inside a single long
+call (e.g. string.rep) is not counted at all, and OBS stays wedged until
 someone closes it.`
 
 func registerScriptingChannel(s *Server) {

@@ -149,9 +149,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   OBS replaces them, the old hook never stops `while true do end` and the new
   one stops it in under a millisecond. The same replacement means a
   **chunk's own** `error()` call — which the sandbox deliberately permits —
-  has the identical problem and is *not* fixed by this change: it still only
-  logs rather than failing the call. That is a separate, pre-existing defect,
-  newly surfaced by this investigation and left open.
+  had the identical problem: a chunk signaling its own failure with
+  `error("something failed")` used to log and keep running past that line, so
+  a caller was told a failed operation succeeded.
+
+  **That gap is now closed too.** `make_env()` hands a chunk `bridge_error`
+  instead of the real `error`, which raises through `assert` the same way the
+  budget hook does — but as a tail call (`return assert(...)`), not a plain
+  statement. That distinction is load-bearing: `assert` itself also prefixes
+  a string or number message with its own caller's position, unconditionally,
+  with no way to suppress or redirect it, so a plain statement would prefix
+  every message with `bridge_error`'s own fixed line. The tail call drops
+  `bridge_error`'s stack frame first, so `assert` blames whatever called it
+  instead — always exactly wherever the chunk wrote `error(...)` — matching
+  real `error()`'s default position exactly, with no manual position-tracking
+  code needed. A table (or other non-string, non-number) message is exempt
+  from that prefixing and survives the round trip unchanged, which is what
+  lets a structured error object like `{code = 5}` come back as a failure
+  carrying the table, not a stringified approximation of one. The one thing
+  it does not reproduce: real `error()`'s `level` argument, which lets a
+  caller blame an arbitrary stack frame or suppress the position with `0`.
+  `assert` offers no such control, so `level` is accepted but not honored —
+  every message gets the same one position regardless. A hand-computed,
+  level-aware prefix was tried first and rejected: `assert`'s own automatic
+  prefix still lands on top of it, producing a double prefix at level 1 and a
+  wrong one at any other level. See
+  [ADR-013](design/decisions/013-the-lua-bridge.md).
 
   What the budget still does not cover is otherwise unchanged from ADR-013: a
   chunk that re-enters its own `pcall` from an unprotected outer loop of its
