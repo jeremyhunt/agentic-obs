@@ -236,8 +236,21 @@ func (s *Server) Stop(ctx context.Context) error {
 	return nil
 }
 
-// GetAddr returns the base URL of the HTTP server.
+// GetAddr returns the base URL of the HTTP server, or an empty string when
+// there is no server.
+//
+// The nil check is load-bearing rather than defensive. internal/mcp builds this
+// server only when HTTPEnabled, and nine call sites across tools, resources and
+// the status provider reach GetAddr through that possibly-nil pointer -- one of
+// them create_screenshot_source, a default-enabled tool. A method on a nil
+// *Server is legal right up until it touches s.mu, so with HTTP off those calls
+// took the whole MCP server down with a nil dereference rather than returning
+// anything. An empty base leaves a relative URL, which is a correct answer to
+// "where is this screenshot" when nothing is serving it.
 func (s *Server) GetAddr() string {
+	if s == nil {
+		return ""
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return fmt.Sprintf("http://%s", s.addr)
